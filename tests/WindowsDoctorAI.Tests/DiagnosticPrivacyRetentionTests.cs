@@ -1,8 +1,11 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using WindowsDoctorAI.Application;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Database;
+using WindowsDoctorAI.Diagnostics;
 using WindowsDoctorAI.Domain;
 using WindowsDoctorAI.Reporting;
 
@@ -80,6 +83,66 @@ public sealed class DiagnosticPrivacyRetentionTests
         Assert.DoesNotContain(email, html, StringComparison.Ordinal);
         Assert.DoesNotContain("PRIVATE-HOST", html, StringComparison.Ordinal);
         Assert.DoesNotContain(rawMessage, html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WindowsUpdateProviderMetadataMatchesAndRawEventTextIsRedactedAcrossSqliteUiAndHtml()
+    {
+        const string host = "PRIVATE-HOST-913";
+        const string user = "private-user-913";
+        const string ip = "198.51.100.73";
+        const string arbitrary = "opaque-event-fragment-913";
+        const string provider = "Microsoft-Windows-WindowsUpdateClient";
+        var rawMessage = $"Host={host}; user={user}; IP={ip}; payload={arbitrary}; HRESULT 0x80073712.";
+        var source = new SingleWindowsUpdateEventSource(new DiagnosticEvent(
+            20, "Microsoft-Windows-WindowsUpdateClient/Operational", provider, 2, FixedNow, rawMessage));
+        var results = await new WindowsUpdateDiagnosticScanner(source).ScanAsync();
+        var eventFinding = Assert.Single(results, result => result.Status == DiagnosticStatus.Finding);
+        Assert.Equal(DiagnosticSourceMetadata.WindowsUpdateClientProvider, eventFinding.SourceMetadata?.Provider);
+
+        var report = new DiagnosticReport(results, FixedNow.AddSeconds(-1), FixedNow, TimeSpan.FromSeconds(1), new HealthScore(80));
+        var run = new DiagnosticRun(Guid.NewGuid(), FixedNow.AddSeconds(-1), FixedNow, TimeSpan.FromSeconds(1),
+            new ComputerInventory { ComputerName = host, UserName = user, IPv4Addresses = [ip] }, report);
+
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var repository = new SqliteDiagnosticRunRepository(context);
+        await repository.SaveAsync(run);
+        var payload = await context.DiagnosticRuns.Select(item => item.PayloadJson).SingleAsync();
+        AssertPrivacyValuesAbsent(payload, host, user, ip, arbitrary, rawMessage, provider);
+        Assert.Contains("WindowsUpdateClient", payload, StringComparison.Ordinal);
+        Assert.Contains("Log=Windows Update", payload, StringComparison.Ordinal);
+        Assert.Contains("ID=20", payload, StringComparison.Ordinal);
+        Assert.Contains("0x80073712", payload, StringComparison.OrdinalIgnoreCase);
+
+        var loaded = await repository.GetLatestAsync();
+        Assert.NotNull(loaded);
+        Assert.Equal(DiagnosticSourceMetadata.WindowsUpdateClientProvider,
+            Assert.Single(loaded.Report!.Results, result => result.Status == DiagnosticStatus.Finding).SourceMetadata?.Provider);
+        var display = DiagnosticDisplayFormatter.FormatFindings(loaded.Report, loaded.Inventory);
+        AssertPrivacyValuesAbsent(display, host, user, ip, arbitrary, rawMessage, provider);
+        Assert.Contains("Fonte estruturada: WindowsUpdateClient", display, StringComparison.Ordinal);
+        Assert.Contains("Log=Windows Update", display, StringComparison.Ordinal);
+        Assert.Contains("0x80073712", display, StringComparison.OrdinalIgnoreCase);
+
+        var packPath = Path.Combine(AppContext.BaseDirectory, "knowledge-packs", "microsoft-windows-update-pilot.json");
+        var pack = JsonSerializer.Deserialize<KnowledgePackage>(await File.ReadAllTextAsync(packPath),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) }
+            })!;
+        var updateRule = Assert.Single(pack.Rules, rule => rule.Match?.ExactErrorCode == "0x80073712");
+        var assessment = new DiagnosticAssessmentService(new SelectedKnowledgeRepository(updateRule),
+            new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
+        var html = await assessment.CreateHtmlReportAsync(loaded);
+        AssertPrivacyValuesAbsent(html, host, user, ip, arbitrary, rawMessage, provider);
+        Assert.Contains("Integridade do component store (0x80073712)", html, StringComparison.Ordinal);
+        Assert.Contains("Fonte estruturada:</strong> WindowsUpdateClient", html, StringComparison.Ordinal);
+        Assert.Contains("Log=Windows Update", html, StringComparison.Ordinal);
+        Assert.Contains("0x80073712", html, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -422,6 +485,43 @@ public sealed class DiagnosticPrivacyRetentionTests
     {
         foreach (var value in values)
             Assert.DoesNotContain(value, text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class SingleWindowsUpdateEventSource(DiagnosticEvent updateEvent) : IWindowsDiagnosticDataSource
+    {
+        public Task<WindowsUpdateProbe> ReadWindowsUpdateAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new WindowsUpdateProbe(
+                ProbeResult<IReadOnlyList<PendingWindowsUpdate>>.Available([]),
+                ProbeResult<bool>.Available(false),
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available([updateEvent])));
+        }
+
+        public Task<ProbeResult<IReadOnlyList<ServiceDiagnosticInfo>>> ReadServicesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProbeResult<IReadOnlyList<ServiceDiagnosticInfo>>.Unavailable("Não utilizado pelo teste."));
+
+        public Task<ProbeResult<IReadOnlyList<DeviceDiagnosticInfo>>> ReadDevicesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProbeResult<IReadOnlyList<DeviceDiagnosticInfo>>.Unavailable("Não utilizado pelo teste."));
+
+        public Task<DiskProbe> ReadDisksAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DiskProbe(
+            ProbeResult<IReadOnlyList<DiskSmartStatus>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiskHealthInfo>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiskVolumeInfo>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiskTemperatureInfo>>.Unavailable("Não utilizado pelo teste.")));
+
+        public Task<EventLogProbe> ReadEventLogsAsync(CancellationToken cancellationToken = default) => Task.FromResult(new EventLogProbe(
+            ProbeResult<IReadOnlyList<DiagnosticEvent>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiagnosticEvent>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiagnosticEvent>>.Unavailable("Não utilizado pelo teste.")));
+    }
+
+    private sealed class SelectedKnowledgeRepository(KnowledgeRule rule) : IKnowledgeRepository
+    {
+        public Task<IReadOnlyList<KnowledgeRule>> GetLatestRulesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<KnowledgeRule>>([rule]);
+
+        public Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class EmptyKnowledgeRepository : IKnowledgeRepository

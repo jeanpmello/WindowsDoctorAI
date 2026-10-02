@@ -25,7 +25,11 @@ public sealed record KnowledgeReference(string Title, string Url);
 public sealed record KnowledgeMatchCondition(
     string ExactErrorCode,
     IReadOnlyList<string> ScannerNames,
-    IReadOnlyList<string> RequiredContextTerms);
+    IReadOnlyList<string> RequiredContextTerms)
+{
+    /// <summary>Providers canônicos requeridos na origem estruturada do achado, nunca no texto livre.</summary>
+    public IReadOnlyList<string> RequiredSourceProviders { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>Orientação declarativa; nunca é executada pela aplicação.</summary>
 public sealed record KnowledgeProcedure(

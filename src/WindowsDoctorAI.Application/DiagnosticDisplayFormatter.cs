@@ -22,7 +22,11 @@ public static class DiagnosticDisplayFormatter
 
         const int displayLimit = 10;
         var lines = findings.Take(displayLimit).Select(result =>
-            $"[{SeverityText(result.Severity)}] {result.ScannerName} — {result.Title}\n{result.Description}\nRecomendação: {result.Recommendation}\nEvidência: {result.Evidence}");
+        {
+            var provider = DiagnosticSourceMetadata.NormalizeProvider(result.SourceMetadata?.Provider);
+            var sourceLine = provider is null ? string.Empty : $"{Environment.NewLine}Fonte estruturada: {provider}";
+            return $"[{SeverityText(result.Severity)}] {result.ScannerName} — {result.Title}\n{result.Description}\nRecomendação: {result.Recommendation}{sourceLine}\nEvidência: {result.Evidence}";
+        });
         var remainder = findings.Length > displayLimit
             ? $"{Environment.NewLine}Exibindo {displayLimit} de {findings.Length} achados. O relatório contém a lista completa."
             : string.Empty;

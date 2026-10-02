@@ -102,6 +102,9 @@ public sealed class HtmlDiagnosticReportFormatter
         {
             var css = result.Severity == DiagnosticSeverity.Critical ? "critical" : result.Severity == DiagnosticSeverity.Warning ? "warning" : string.Empty;
             builder.Append("<article class=\"item ").Append(css).Append("\"><h3>").Append(S(result.Title, sourceInventory)).Append("</h3><p>").Append(S(result.Category, sourceInventory)).Append(" / ").Append(S(result.ScannerName, sourceInventory)).Append(" · ").Append(E(Label(result.Status))).Append(" · ").Append(E(Label(result.Severity))).AppendLine("</p>");
+            var provider = DiagnosticSourceMetadata.NormalizeProvider(result.SourceMetadata?.Provider);
+            if (provider is not null)
+                builder.Append("<p><strong>Fonte estruturada:</strong> ").Append(E(provider)).AppendLine("</p>");
             builder.Append("<p>").Append(S(result.Description, sourceInventory)).AppendLine("</p><p><strong>Evidência:</strong> ");
             builder.Append(S(result.Evidence, sourceInventory)).AppendLine("</p><p class=\"muted\">Recomendação do scanner: ");
             builder.Append(S(result.Recommendation, sourceInventory)).Append(" · ").Append(E(result.Timestamp.ToString("u"))).AppendLine("</p></article>");

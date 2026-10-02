@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "1.1",
-  "version": "microsoft-windows-pilot-2026-10-02-v1",
+  "schemaVersion": "1.2",
+  "version": "microsoft-windows-pilot-2026-10-02-v2",
   "source": "Windows Doctor AI: curadoria de primeira parte de páginas Microsoft. Publisher e URLs não autenticados criptograficamente.",
   "rules": [
     {
@@ -67,14 +67,15 @@
       "match": {
         "exactErrorCode": "0x80073712",
         "scannerNames": ["Windows Update"],
-        "requiredContextTerms": ["WindowsUpdateClient"]
+        "requiredContextTerms": [],
+        "requiredSourceProviders": ["WindowsUpdateClient"]
       },
       "requiredEvidence": [
         "Código literal 0x80073712 no achado",
-        "Contexto WindowsUpdateClient no mesmo achado"
+        "Provider estruturado WindowsUpdateClient no mesmo achado"
       ],
       "procedure": {
-        "diagnosticAction": "Confirme o código exato e o contexto WindowsUpdateClient no mesmo achado. Se a etapa DISM falhar, preserve e inspecione CBS.log.",
+        "diagnosticAction": "Confirme o código exato e o provider estruturado WindowsUpdateClient no mesmo achado. Se a etapa DISM falhar, preserve e inspecione CBS.log.",
         "correctiveAction": "Ação manual, elevada e modificadora: siga o procedimento DISM documentado pela Microsoft. Execute System File Checker (SFC) somente se DISM concluir com sucesso. Se DISM falhar, não prossiga para SFC. Preserve e inspecione CBS.log.",
         "requiredPrivilege": "Elevação administrativa para o procedimento DISM, conforme a documentação Microsoft. Este pacote contém apenas orientação, sem comandos executáveis.",
         "requiresElevation": true,

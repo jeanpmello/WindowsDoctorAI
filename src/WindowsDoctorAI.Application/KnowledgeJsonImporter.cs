@@ -76,7 +76,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         }
         catch (JsonException exception)
         {
-            throw new InvalidDataException("JSON inválido ou fora do schema de conhecimento 1.0/1.1.", exception);
+            throw new InvalidDataException("JSON inválido ou fora do schema de conhecimento 1.0/1.1/1.2.", exception);
         }
 
         Validate(package);
@@ -86,9 +86,10 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
 
     private static void Validate(KnowledgePackage package)
     {
-        var strictSchema = package.SchemaVersion == "1.1";
+        var strictSchema = package.SchemaVersion is "1.1" or "1.2";
+        var structuredSourceSchema = package.SchemaVersion == "1.2";
         if (!strictSchema && package.SchemaVersion != "1.0")
-            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0' ou '1.1'.");
+            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0', '1.1' ou '1.2'.");
         ValidateText(package.Version, "version", 40);
         if (!Regex.IsMatch(package.Version, @"\A[A-Za-z0-9._-]{1,40}\z", RegexOptions.CultureInvariant))
             throw new InvalidDataException("version deve conter apenas letras, números, ponto, hífen ou sublinhado.");
@@ -122,13 +123,13 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             }
 
             if (strictSchema)
-                ValidateStrictRule(rule);
+                ValidateStrictRule(rule, structuredSourceSchema);
             else if (rule.Applicability is not null || rule.Match is not null || rule.RequiredEvidence is not null || rule.Procedure is not null)
                 throw new InvalidDataException($"A regra {rule.Id} usa campos do schema 1.1, mas o pacote declara 1.0.");
         }
     }
 
-    private static void ValidateStrictRule(KnowledgeRule rule)
+    private static void ValidateStrictRule(KnowledgeRule rule, bool structuredSourceSchema)
     {
         ValidateText(rule.Applicability, $"applicability ({rule.Id})", 600);
         if (rule.Match is null)
@@ -137,9 +138,23 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         if (!SafeErrorCode.IsMatch(rule.Match.ExactErrorCode))
             throw new InvalidDataException($"A regra {rule.Id} precisa de um código exato no formato 0x seguido por oito dígitos hexadecimais.");
         ValidateRequiredConditions(rule.Match.ScannerNames, "match.scannerNames", rule.Id, 80);
-        ValidateRequiredConditions(rule.Match.RequiredContextTerms, "match.requiredContextTerms", rule.Id, 120);
+        var contextTerms = rule.Match.RequiredContextTerms ?? Array.Empty<string>();
+        var sourceProviders = rule.Match.RequiredSourceProviders ?? Array.Empty<string>();
+        if (contextTerms.Count > 0)
+            ValidateRequiredConditions(contextTerms, "match.requiredContextTerms", rule.Id, 120);
+        if (sourceProviders.Count > 0)
+        {
+            if (!structuredSourceSchema)
+                throw new InvalidDataException($"A regra {rule.Id} usa providers estruturados, disponíveis somente no schema 1.2.");
+            ValidateRequiredConditions(sourceProviders, "match.requiredSourceProviders", rule.Id, 120);
+            if (sourceProviders.Any(provider => !string.Equals(
+                    DiagnosticSourceMetadata.NormalizeProvider(provider), provider, StringComparison.Ordinal)))
+                throw new InvalidDataException($"A regra {rule.Id} declara provider de origem desconhecido ou não canônico.");
+        }
+        if (contextTerms.Count == 0 && sourceProviders.Count == 0)
+            throw new InvalidDataException($"A regra {rule.Id} precisa declarar contexto textual ou provider estruturado específico.");
         if (rule.Match.ScannerNames.Any(value => GenericScannerNames.Contains(value))
-            || rule.Match.RequiredContextTerms.Any(value => GenericContextTerms.Contains(value)))
+            || contextTerms.Any(value => GenericContextTerms.Contains(value)))
             throw new InvalidDataException($"A regra {rule.Id} usa uma condição genérica; indique scanner e contexto específicos.");
         if (rule.ErrorCodes.Count != 0 || rule.Symptoms.Count != 0)
             throw new InvalidDataException($"A regra {rule.Id} não pode combinar match estrito com listas de códigos/sintomas legadas.");

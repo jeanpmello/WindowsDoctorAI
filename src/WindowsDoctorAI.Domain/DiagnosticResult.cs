@@ -17,6 +17,26 @@ public enum DiagnosticStatus
     NotVerified
 }
 
+/// <summary>Origem estruturada allowlist; nunca contém nomes de providers arbitrários.</summary>
+public sealed record DiagnosticSourceMetadata(string Provider)
+{
+    public const string WindowsUpdateClientProvider = "WindowsUpdateClient";
+
+    /// <summary>Normaliza somente nomes conhecidos obtidos do campo estruturado do Event Log.</summary>
+    public static DiagnosticSourceMetadata? FromEventProvider(string? provider)
+    {
+        var normalized = NormalizeProvider(provider);
+        return normalized is null ? null : new DiagnosticSourceMetadata(normalized);
+    }
+
+    /// <summary>Retorna o identificador canônico para providers explicitamente permitidos.</summary>
+    public static string? NormalizeProvider(string? provider) =>
+        string.Equals(provider, WindowsUpdateClientProvider, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(provider, "Microsoft-Windows-WindowsUpdateClient", StringComparison.OrdinalIgnoreCase)
+            ? WindowsUpdateClientProvider
+            : null;
+}
+
 /// <summary>Formato comum e serializável entregue por todos os scanners e plugins.</summary>
 public sealed record DiagnosticResult(
     string ScannerName,
@@ -28,7 +48,11 @@ public sealed record DiagnosticResult(
     string Recommendation,
     string Evidence,
     TimeSpan Duration,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp)
+{
+    /// <summary>Metadado de origem estruturado, normalizado e independente do texto do evento.</summary>
+    public DiagnosticSourceMetadata? SourceMetadata { get; init; }
+}
 
 /// <summary>Resumo da cobertura real por categoria, sem tratar indisponibilidade como saúde.</summary>
 public sealed record DiagnosticCategorySummary(

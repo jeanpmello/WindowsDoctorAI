@@ -20,7 +20,7 @@ public sealed class KnowledgePilotPackTests
         var preview = importer.Preview(json);
         var package = DeserializePackage(json);
 
-        Assert.Equal("microsoft-windows-pilot-2026-10-02-v1", preview.Version);
+        Assert.Equal("microsoft-windows-pilot-2026-10-02-v2", preview.Version);
         Assert.Equal(2, preview.RuleCount);
         Assert.Equal(2, package.Rules.Count);
         Assert.Contains("curadoria de primeira parte", preview.Source, StringComparison.OrdinalIgnoreCase);
@@ -62,6 +62,8 @@ public sealed class KnowledgePilotPackTests
             json.Replace("\"exactErrorCode\": \"0xC1900107\"", "\"exactErrorCode\": \"0xC190107\"", StringComparison.Ordinal),
             json.Replace("\"requiredEvidence\": [", "\"command\": \"shutdown /r\", \"requiredEvidence\": [", StringComparison.Ordinal),
             json.Replace("\"requiredEvidence\": [", "\"script\": \"ignored\", \"requiredEvidence\": [", StringComparison.Ordinal),
+            json.Replace("\"requiredSourceProviders\": [\"WindowsUpdateClient\"]", "\"requiredSourceProviders\": [\"UnknownProvider\"]", StringComparison.Ordinal),
+            json.Replace("\"schemaVersion\": \"1.2\"", "\"schemaVersion\": \"1.1\"", StringComparison.Ordinal),
             json.Replace("Confirme o código exato e o contexto de Windows Setup no mesmo achado. Não aplique esta regra a um código isolado ou ocorrido em outro contexto.", "execute script document", StringComparison.Ordinal),
             json.Replace("Confirme o código exato e o contexto de Windows Setup no mesmo achado. Não aplique esta regra a um código isolado ou ocorrido em outro contexto.", "shutdown /r", StringComparison.Ordinal),
             json.Replace("Ação manual, elevada e modificadora: siga o procedimento DISM documentado pela Microsoft. Execute System File Checker (SFC) somente se DISM concluir com sucesso. Se DISM falhar, não prossiga para SFC. Preserve e inspecione CBS.log.", "DISM.exe /Online /Cleanup-Image", StringComparison.Ordinal)
@@ -77,6 +79,7 @@ public sealed class KnowledgePilotPackTests
         var setupRule = Assert.Single(package.Rules, rule => rule.Match!.ExactErrorCode == "0xC1900107");
         var updateRule = Assert.Single(package.Rules, rule => rule.Match!.ExactErrorCode == "0x80073712");
         var engine = new RecommendationEngine();
+        var updateProvider = DiagnosticSourceMetadata.FromEventProvider("Microsoft-Windows-WindowsUpdateClient");
 
         Assert.Single(engine.Recommend(CreateReport(Finding("Windows Update", "Windows Setup reported 0xC1900107 during upgrade.")), [setupRule]));
         Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update", "Error 0xC1900107.")), [setupRule]));
@@ -87,8 +90,13 @@ public sealed class KnowledgePilotPackTests
         Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update", "Windows Setup reported 0xC19001070 during upgrade.")), [setupRule]));
         Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update", "Windows Setup reported 0xC1900107_suffix during upgrade.")), [setupRule]));
 
-        Assert.Single(engine.Recommend(CreateReport(Finding("Windows Update", "WindowsUpdateClient reported 0x80073712 in a servicing event.")), [updateRule]));
-        Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update", "Windows Update reported 0x80073712.")), [updateRule]));
+        Assert.NotNull(updateProvider);
+        Assert.Equal(["WindowsUpdateClient"], updateRule.Match!.RequiredSourceProviders);
+        Assert.Empty(updateRule.Match.RequiredContextTerms);
+        Assert.Single(engine.Recommend(CreateReport(Finding("Windows Update", "0x80073712", updateProvider)), [updateRule]));
+        Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update", "WindowsUpdateClient reported 0x80073712.")), [updateRule]));
+        Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update", "WindowsUpdateClient event without code.", updateProvider)), [updateRule]));
+        Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update", "0x80073712", new DiagnosticSourceMetadata("OtherProvider"))), [updateRule]));
     }
 
     [Fact]
@@ -96,8 +104,9 @@ public sealed class KnowledgePilotPackTests
     {
         var package = DeserializePackage(ReadPilotPack());
         var now = DateTimeOffset.UtcNow;
-        var report = CreateReport(Finding("Windows Update",
-            "Windows Setup upgrade reported 0xC1900107. Microsoft-Windows-WindowsUpdateClient/Operational reported 0x80073712."));
+        var report = CreateReport(
+            Finding("Windows Update", "Windows Setup upgrade reported 0xC1900107."),
+            Finding("Windows Update", "Event code 0x80073712.", DiagnosticSourceMetadata.FromEventProvider("Microsoft-Windows-WindowsUpdateClient")));
         var recommendations = new RecommendationEngine().Recommend(report, package.Rules.Reverse());
 
         Assert.Equal(
@@ -144,10 +153,10 @@ public sealed class KnowledgePilotPackTests
             });
     }
 
-    private static DiagnosticResult Finding(string scanner, string evidence) => new(
+    private static DiagnosticResult Finding(string scanner, string evidence, DiagnosticSourceMetadata? sourceMetadata = null) => new(
         scanner, "Sistema", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
         "Falha contextual observada", evidence, "Nenhuma ação foi executada.", evidence,
-        TimeSpan.Zero, DateTimeOffset.UtcNow);
+        TimeSpan.Zero, DateTimeOffset.UtcNow) { SourceMetadata = sourceMetadata };
 
     private static DiagnosticReport CreateReport(params DiagnosticResult[] results) => new(
         results, DateTimeOffset.UtcNow.AddSeconds(-1), DateTimeOffset.UtcNow, TimeSpan.FromSeconds(1), new HealthScore(80));

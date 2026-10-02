@@ -137,7 +137,10 @@ public static class DiagnosticPrivacyRedactor
             Recommendation = containsRawEventMessage
                 ? "Revise o evento na fonte do Windows; o texto original foi omitido por privacidade."
                 : RedactText(result.Recommendation, inventory),
-            Evidence = containsRawEventMessage ? RedactEventEvidence(result.Evidence) : RedactText(result.Evidence, inventory)
+            Evidence = containsRawEventMessage ? RedactEventEvidence(result.Evidence) : RedactText(result.Evidence, inventory),
+            SourceMetadata = result.SourceMetadata is null
+                ? null
+                : DiagnosticSourceMetadata.FromEventProvider(result.SourceMetadata.Provider)
         };
     }
 

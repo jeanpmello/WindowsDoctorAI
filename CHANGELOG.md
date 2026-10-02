@@ -14,6 +14,7 @@ Mudanças relevantes do Windows Doctor AI.
 - Framework de reparo com confirmação, risco, auditoria e rollback contratual. Nenhum plugin de modificação do Windows está registrado.
 - Serviço local de relatório HTML com resumo, score, evidências, recomendações, referências e histórico; sem PDF ou fluxo de exportação visual.
 - Testes de unidade e SQLite para importação, versão do schema, confiança, correlação, confirmação, histórico e escaping HTML.
+- Metadata `SourceMetadata` normalizado/allowlist para provider do Event Log, matching do piloto por campo estruturado, e redaction uniforme da mensagem bruta em SQLite, UI e HTML; schema do pacote atualizado para 1.2.
 - README, arquitetura, roadmap, segurança e documentação do banco atualizados.
 
 ### Notes

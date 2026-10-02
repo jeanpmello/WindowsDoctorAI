@@ -23,8 +23,12 @@ public sealed class RecommendationEngine
                 var searchable = string.Join("\n", finding.Title, finding.Description, finding.Evidence);
                 if (rule.Match is { } strictMatch)
                 {
+                    var sourceProvider = finding.SourceMetadata is { } sourceMetadata
+                        ? DiagnosticSourceMetadata.NormalizeProvider(sourceMetadata.Provider)
+                        : null;
                     if (!strictMatch.ScannerNames.Contains(finding.ScannerName, StringComparer.OrdinalIgnoreCase)
                         || !strictMatch.RequiredContextTerms.All(term => ContainsPhrase(searchable, term))
+                        || !strictMatch.RequiredSourceProviders.All(provider => string.Equals(sourceProvider, provider, StringComparison.OrdinalIgnoreCase))
                         || !ContainsToken(searchable, strictMatch.ExactErrorCode))
                         continue;
                     matches.Add((finding, strictMatch.ExactErrorCode, true));

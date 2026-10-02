@@ -79,11 +79,12 @@ public sealed class WindowsUpdateDiagnosticScanner(IWindowsDiagnosticDataSource 
                     var code = ErrorCode.Match(failure.Message ?? string.Empty).Value;
                     var severity = failure.Level == 1 ? DiagnosticSeverity.Critical : DiagnosticSeverity.Warning;
                     var time = failure.Timestamp?.ToLocalTime().ToString("u") ?? "horário indisponível";
-                    results.Add(DiagnosticResultFactory.Create(Name, Category, severity, DiagnosticStatus.Finding,
+                    var result = DiagnosticResultFactory.Create(Name, Category, severity, DiagnosticStatus.Finding,
                         $"Evento de falha do Windows Update (ID {failure.EventId})",
                         string.IsNullOrWhiteSpace(failure.Message) ? "O log registrou um evento de erro/criticidade sem descrição legível." : failure.Message,
                         "Pesquise o código e os detalhes deste evento no Windows Update; nenhuma correção foi aplicada.",
-                        $"{failure.LogName} · {failure.Provider} · evento {failure.EventId} · {time} · código {(code.Length == 0 ? "não identificado no texto" : code)}."));
+                        $"Log=Windows Update; ID={failure.EventId}; nível={(failure.Level == 1 ? "Critical" : "Error")}; data={time}; código {(code.Length == 0 ? "não identificado no texto" : code)}.");
+                    results.Add(result with { SourceMetadata = DiagnosticSourceMetadata.FromEventProvider(failure.Provider) });
                 }
             }
         }
