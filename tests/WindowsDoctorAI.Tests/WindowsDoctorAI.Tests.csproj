@@ -8,6 +8,7 @@
     <PackageReference Include="coverlet.collector" Version="6.0.2" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
@@ -20,6 +21,9 @@
     <ProjectReference Include="../../src/WindowsDoctorAI.Database/WindowsDoctorAI.Database.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.Reporting/WindowsDoctorAI.Reporting.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.Repair/WindowsDoctorAI.Repair.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/WindowsDoctorAI.App/HomeViewModel.cs" Link="App/HomeViewModel.cs" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
   <ItemGroup>

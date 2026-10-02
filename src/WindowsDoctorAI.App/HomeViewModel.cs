@@ -278,6 +278,7 @@ public partial class HomeViewModel(
 
     private void DisplayInventory(ComputerInventory inventory)
     {
+        inventory = DiagnosticPrivacyRedactor.RedactInventory(inventory);
         ComputerName = Text(inventory.ComputerName);
         ManufacturerModel = $"{Text(inventory.Manufacturer)} · {Text(inventory.Model)}";
         SerialNumber = Text(inventory.SerialNumber);

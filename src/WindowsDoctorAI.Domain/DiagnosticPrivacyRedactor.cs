@@ -29,8 +29,15 @@ public static class DiagnosticPrivacyRedactor
     {
         ArgumentNullException.ThrowIfNull(run);
         var inventory = run.Inventory;
+        return run with { Inventory = RedactInventory(inventory), Report = RedactReport(run.Report, inventory) };
+    }
+
+    /// <summary>Retorna uma cópia minimizada do inventário para apresentação, sem alterar o snapshot original.</summary>
+    public static ComputerInventory RedactInventory(ComputerInventory inventory)
+    {
+        ArgumentNullException.ThrowIfNull(inventory);
         var identifiers = GetIdentifyingValues(inventory);
-        var redactedInventory = inventory with
+        return inventory with
         {
             ComputerName = RedactIdentifier(inventory.ComputerName),
             Manufacturer = RedactOptionalText(inventory.Manufacturer, identifiers),
@@ -77,8 +84,6 @@ public static class DiagnosticPrivacyRedactor
                 IPv6Addresses = Array.Empty<string>()
             }).ToArray()
         };
-
-        return run with { Inventory = redactedInventory, Report = RedactReport(run.Report, inventory) };
     }
 
     /// <summary>Redige todos os campos textuais de resultados, inclusive os recebidos de payloads legados/plugins.</summary>
