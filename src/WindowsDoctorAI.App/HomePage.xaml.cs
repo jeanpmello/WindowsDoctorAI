@@ -77,7 +77,7 @@ public sealed partial class HomePage : Page
 
     private static nint GetOwnerHandle()
     {
-        var window = (Application.Current as App)?.MainWindow
+        var window = (global::Microsoft.UI.Xaml.Application.Current as App)?.MainWindow
             ?? throw new InvalidOperationException("A janela principal não está disponível para abrir o seletor de arquivos.");
         return WindowNative.GetWindowHandle(window);
     }
