@@ -15,6 +15,7 @@ Este roadmap distingue componentes implementados de integração visual, valida�
 - Dashboard, cobertura, evidências, persistência do relatório e testes com fontes substitutas.
 - Scanners somente de leitura; sem modificações de sistema.
 - O scanner de backup consulta `Get-WBBackupSet` pelo Windows PowerShell existente e mostra apenas contagem, data e tipo minimizados; presença de metadados não comprova integridade nem capacidade de restauração.
+- Há somente um planejador isolado de prévia sintética: exige conjunto/versão/volume/item conhecidos na lista sintética fornecida, origem e destino alternativo absolutos distintos, bloqueia sobrescrita e fixa a política `CreateCopy`. Não está ligado à UI nem a uma fonte real de itens WSB, não consulta o filesystem e não gera comando copiável.
 - Os testes Linux usam runner falso e fixtures JSON sintéticas. Eles validam parsing/estados e não simulam nem certificam Windows Server 2019 real.
 
 Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, SMART, hardware e `Get-WBBackupSet` em Windows representativo, inclusive Server 2019.
@@ -31,7 +32,7 @@ Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, S
 - Ação WinUI para selecionar pacote JSON local, validar e revisar versão, fonte declarada, hash SHA-256 e total de regras antes da importação; base vazia é explícita e falhas/conflitos não deixam gravação parcial.
 - Testes de unidade e migração SQLite para regras, prévia/importação atômica, validação, correspondência, correlação, confirmação, auditoria e composição/escape HTML.
 
-Não incluído: PDF gerado no app, plugin que modifique o Windows, restauração real de backup ou regras oficiais preinstaladas. Qualquer recuperação é uma ação posterior e separada, não executada nem validada nesta etapa; testes end-to-end em Windows permanecem pendentes.
+Não incluído: PDF gerado no app, plugin que modifique o Windows, restauração real de backup ou regras oficiais preinstaladas. A prévia sintética não é suporte de recuperação: não garante recuperação nem integridade e exige validação humana. Qualquer restauração real permanece desabilitada e aguarda testes em uma VM Windows Server 2019; nenhum backup real foi restaurado ou alterado nesta etapa.
 
 ## Próximas etapas de qualidade
 

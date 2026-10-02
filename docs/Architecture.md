@@ -30,6 +30,8 @@ As dependências continuam apontando para contratos e domínio. `Domain` não co
 
 Os plugins existentes consultam Windows Update, Services, Drivers, Disk e Event Viewer em modo de leitura. Os limites específicos de APIs, permissões, SMART, cobertura e volume permanecem descritos nos resultados e na documentação do Milestone 2.
 
+O diagnóstico de Windows Server Backup expõe apenas contagem, data e tipo minimizados; não fornece vínculo entre conjunto, versão, volume e item. `SyntheticFileRecoveryPreviewPlanner` é uma exceção deliberadamente isolada: valida seleções contra dados sintéticos fornecidos pelo chamador e produz somente texto/modelo descritivo com política fixa `CreateCopy`. Não está registrado na composição nem na UI, não consulta backup ou filesystem, não gera comando e não executa recuperação. Isso não representa suporte de restauração.
+
 ## Knowledge Engine e recomendações
 
 `KnowledgeRule` modela identificador e versão, domínio, título, impacto, códigos, sintomas, causas, soluções e referências HTTPS. O importador preserva compatibilidade com schema JSON `1.0`/`1.1` e aceita `1.2`, limitado a 512 KiB/500 regras, com listas/texto limitados, enum textual, referências HTTPS e rejeição de propriedades não mapeadas. Regras estritas declaram aplicabilidade, código HRESULT exato, scanner, contexto específico no mesmo achado, evidência requerida e procedimento manual com privilégio/risco/backup/rollback/limitação da fonte. No schema 1.2, contexto também pode exigir providers estruturados canônicos da allowlist. Caminhos locais, campos desconhecidos de comando/script e padrões conhecidos de comando/injeção são rejeitados. O JSON é dado declarativo e nunca é interpretado como código, caminho de execução ou comando.
