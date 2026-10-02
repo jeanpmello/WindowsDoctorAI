@@ -10,12 +10,14 @@ Este roadmap distingue componentes implementados de integração visual, valida�
 
 ## Milestone 2 — Diagnostic Engine (implementado; validação Windows pendente)
 
-- Modelo `DiagnosticResult`, contratos e plugins para Windows Update, Services, Drivers, Disk e Event Viewer.
+- Modelo `DiagnosticResult`, contratos e plugins para Windows Update, Services, Drivers, Disk, Event Viewer e descoberta de metadados do Windows Server Backup.
 - Execução paralela conforme segurança declarada, isolamento de falhas, medição e Health Score heurístico.
 - Dashboard, cobertura, evidências, persistência do relatório e testes com fontes substitutas.
 - Scanners somente de leitura; sem modificações de sistema.
+- O scanner de backup consulta `Get-WBBackupSet` pelo Windows PowerShell existente e mostra apenas contagem, data e tipo minimizados; presença de metadados não comprova integridade nem capacidade de restauração.
+- Os testes Linux usam runner falso e fixtures JSON sintéticas. Eles validam parsing/estados e não simulam nem certificam Windows Server 2019 real.
 
-Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, SMART e hardware em Windows.
+Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, SMART, hardware e `Get-WBBackupSet` em Windows representativo, inclusive Server 2019.
 
 ## Milestone 3 — Knowledge & Repair Platform (fluxos principais implementados; validação Windows pendente)
 
@@ -29,7 +31,7 @@ Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, S
 - Ação WinUI para selecionar pacote JSON local, validar e revisar versão, fonte declarada, hash SHA-256 e total de regras antes da importação; base vazia é explícita e falhas/conflitos não deixam gravação parcial.
 - Testes de unidade e migração SQLite para regras, prévia/importação atômica, validação, correspondência, correlação, confirmação, auditoria e composição/escape HTML.
 
-Não incluído: PDF gerado no app, plugin que modifique o Windows ou regras oficiais preinstaladas. Validação XAML/WinUI e testes end-to-end em Windows permanecem pendentes.
+Não incluído: PDF gerado no app, plugin que modifique o Windows, restauração real de backup ou regras oficiais preinstaladas. Qualquer recuperação é uma ação posterior e separada, não executada nem validada nesta etapa; testes end-to-end em Windows permanecem pendentes.
 
 ## Próximas etapas de qualidade
 

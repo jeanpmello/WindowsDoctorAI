@@ -9,7 +9,10 @@ public static class DiagnosticDisplayFormatter
     {
         ArgumentNullException.ThrowIfNull(report);
         report = DiagnosticPrivacyRedactor.RedactReport(report, inventory)!;
-        var findings = report.Results.Where(result => result.Status == DiagnosticStatus.Finding)
+        var findings = report.Results.Where(result =>
+                result.Status == DiagnosticStatus.Finding ||
+                string.Equals(result.ScannerName, "Windows Server Backup", StringComparison.OrdinalIgnoreCase) &&
+                result.Status is DiagnosticStatus.NotVerified or DiagnosticStatus.Unavailable)
             .OrderByDescending(result => result.Severity)
             .ThenByDescending(result => result.Timestamp)
             .ToArray();
@@ -25,7 +28,13 @@ public static class DiagnosticDisplayFormatter
         {
             var provider = DiagnosticSourceMetadata.NormalizeProvider(result.SourceMetadata?.Provider);
             var sourceLine = provider is null ? string.Empty : $"{Environment.NewLine}Fonte estruturada: {provider}";
-            return $"[{SeverityText(result.Severity)}] {result.ScannerName} — {result.Title}\n{result.Description}\nRecomendação: {result.Recommendation}{sourceLine}\nEvidência: {result.Evidence}";
+            var label = result.Status switch
+            {
+                DiagnosticStatus.NotVerified => "Não verificado",
+                DiagnosticStatus.Unavailable => "Indisponível",
+                _ => SeverityText(result.Severity)
+            };
+            return $"[{label}] {result.ScannerName} — {result.Title}\n{result.Description}\nRecomendação: {result.Recommendation}{sourceLine}\nEvidência: {result.Evidence}";
         });
         var remainder = findings.Length > displayLimit
             ? $"{Environment.NewLine}Exibindo {displayLimit} de {findings.Length} achados. O relatório contém a lista completa."

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Diagnostics;
 using WindowsDoctorAI.Domain;
+using WindowsDoctorAI.Repair;
 
 namespace WindowsDoctorAI.Tests;
 
@@ -45,8 +46,9 @@ public sealed class DiagnosticCompatibilityTests
         var scanners = provider.GetServices<IDiagnosticScanner>().ToArray();
 
         Assert.Equal(
-            ["Windows Update", "Services", "Drivers", "Disk", "Event Viewer"],
+            ["Windows Update", "Services", "Drivers", "Disk", "Event Viewer", "Windows Server Backup"],
             scanners.Select(scanner => scanner.Name));
         Assert.All(scanners, scanner => Assert.True(scanner.SupportsParallelExecution));
+        Assert.Empty(provider.GetServices<IRepairPlugin>());
     }
 }

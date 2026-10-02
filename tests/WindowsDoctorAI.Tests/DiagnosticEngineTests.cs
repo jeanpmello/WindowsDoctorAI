@@ -299,12 +299,13 @@ public sealed class DiagnosticScannerPluginTests
             new ServicesDiagnosticScanner(source),
             new DriversDiagnosticScanner(source),
             new DiskDiagnosticScanner(source),
-            new EventViewerDiagnosticScanner(source)
+            new EventViewerDiagnosticScanner(source),
+            new WindowsBackupDiagnosticScanner(new UnsupportedWindowsBackupDataSource())
         ];
         var report = await new DiagnosticEngine(scanners, NullLogger<DiagnosticEngine>.Instance).RunAsync();
 
         Assert.Null(report.HealthScore);
-        Assert.Equal(12, report.UnavailableChecks);
+        Assert.Equal(13, report.UnavailableChecks);
         Assert.Equal(0, report.VerifiedChecks);
         Assert.All(report.Results, result => Assert.Equal(DiagnosticStatus.Unavailable, result.Status));
     }

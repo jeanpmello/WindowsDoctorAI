@@ -34,6 +34,17 @@ public static class DiagnosticsServiceCollectionExtensions
         services.AddSingleton<IDiagnosticScanner, DriversDiagnosticScanner>();
         services.AddSingleton<IDiagnosticScanner, DiskDiagnosticScanner>();
         services.AddSingleton<IDiagnosticScanner, EventViewerDiagnosticScanner>();
+        if (OperatingSystem.IsWindows())
+        {
+            services.AddSingleton<IWindowsBackupCommandRunner, WindowsPowerShellBackupCommandRunner>();
+            services.AddSingleton<IWindowsBackupDataSource, WindowsBackupDataSource>();
+        }
+        else
+        {
+            services.AddSingleton<IWindowsBackupDataSource, UnsupportedWindowsBackupDataSource>();
+        }
+
+        services.AddSingleton<IDiagnosticScanner, WindowsBackupDiagnosticScanner>();
         return services;
     }
 
