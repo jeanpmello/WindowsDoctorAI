@@ -2,19 +2,22 @@
 
 Mudanças relevantes do Windows Doctor AI.
 
-## [Unreleased]
+## [Unreleased] — Milestone 3: Knowledge & Repair Platform
 
 ### Added
 
-- Solution `WindowsDoctorAI.sln` em .NET 9 com os dez projetos de `src/` e `tests/WindowsDoctorAI.Tests`.
-- App WinUI 3 com navegação Inicial/Sobre/Configurações, MVVM Toolkit, DI, Logging e Configuration.
-- Caso de uso de diagnóstico e scanner `ComputerInventoryScanner` com adaptador Windows somente de leitura para WMI, BIOS/firmware, TPM, Secure Boot e interfaces de rede.
-- Histórico e preferências locais com EF Core/SQLite; retenção futura pode ser desligada nas Configurações.
-- Cobertura xUnit para score, scanner, cancelamento, caso de uso, persistência opcional e round-trip SQLite.
-- README, `PROJECT_RULES.md` e documentação de arquitetura, persistência e segurança revisados.
+- Modelo declarativo de conhecimento com versões de regras, erros, sintomas, causas, soluções, impacto e referências.
+- Importador JSON estrito e limitado; regras permanecem inertes, e o SHA-256 serve à identificação/idempotência, não à autenticação da origem.
+- Schema SQLite versionado por `PRAGMA user_version`, compatível com bancos dos Milestones 1–2.
+- Recommendation Engine com correspondências literais, evidências rastreáveis e confiança categórica explicada; nenhuma regra factual pré-semeada.
+- Root Cause Analyzer com associações por identificadores compartilhados; não determina causa ou cronologia.
+- Framework de reparo com confirmação, risco, auditoria e rollback contratual. Nenhum plugin de modificação do Windows está registrado.
+- Serviço local de relatório HTML com resumo, score, evidências, recomendações, referências e histórico; sem PDF ou fluxo de exportação visual.
+- Testes de unidade e SQLite para importação, versão do schema, confiança, correlação, confirmação, histórico e escaping HTML.
+- README, arquitetura, roadmap, segurança e documentação do banco atualizados.
 
 ### Notes
 
-- Health Score permanece fixo em 95 para demonstração.
-- Testes de UI, compilador XAML e coleta física dependem de Windows; não executados neste ambiente Linux.
-- .NET 9 foi mantido conforme escopo solicitado; avaliar o fim de suporte previsto em 10/11/2026 antes de produção.
+- Regras importadas e referências são declaradas; o aplicativo não verifica automaticamente sua autenticidade ou validade.
+- WinUI/XAML e APIs Windows continuam dependendo de validação em uma máquina Windows; testes em Linux não comprovam esse comportamento.
+- A edição Enterprise, AI Assistant, timeline, comparação de diagnósticos, dashboard corporativo e reparos reais permanecem no roadmap.

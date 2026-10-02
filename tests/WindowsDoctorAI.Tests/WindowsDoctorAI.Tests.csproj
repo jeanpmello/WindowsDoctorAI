@@ -19,6 +19,7 @@
     <ProjectReference Include="../../src/WindowsDoctorAI.Diagnostics/WindowsDoctorAI.Diagnostics.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.Database/WindowsDoctorAI.Database.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.Reporting/WindowsDoctorAI.Reporting.csproj" />
+    <ProjectReference Include="../../src/WindowsDoctorAI.Repair/WindowsDoctorAI.Repair.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
 </Project>

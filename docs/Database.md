@@ -1,24 +1,29 @@
 # Banco de dados
 
-**Estado:** persistência inicial implementada com EF Core 9 e SQLite. O schema pode evoluir; a aplicação ainda não dispõe de migrações versionadas, ferramenta de remoção/exportação de histórico ou criptografia própria.
+**Estado:** EF Core 9 e SQLite local; o schema tem versão independente, rastreada por `PRAGMA user_version`. A versão atual é 1. A aplicação não usa migrations EF Core geradas; `WindowsDoctorDatabaseMigrator` aplica passos SQL incrementais idempotentes.
 
-## Localização e inicialização
+## Localização e atualização
 
-A aplicação cria `windowsdoctorai.db` em `%LOCALAPPDATA%\WindowsDoctorAI\` e inicializa o schema com `EnsureCreated`. No Linux, os testes usam SQLite em memória; isso não altera o comportamento nem o local do banco Windows.
+A aplicação cria `windowsdoctorai.db` em `%LOCALAPPDATA%\WindowsDoctorAI\`. Inicialização preserva `EnsureCreated` para a fundação original e, em seguida, roda as migrações próprias. Um banco antigo do Milestone 1/2 é tratado como versão 0: as tabelas novas são criadas com `IF NOT EXISTS`, sem apagar execuções ou preferências. Um banco com versão superior à suportada é recusado para evitar downgrade silencioso.
 
-## Estrutura inicial
+Qualquer alteração futura deve adicionar um próximo passo sequencial, dentro de transação, com teste de migração a partir do schema anterior. Não renumere nem edite migrações já publicadas.
 
-- **`DiagnosticRuns`** — chave `Id`, timestamp de conclusão em Unix milliseconds para ordenar o resultado mais recente, e `PayloadJson` que contém a execução e o inventário tipado.
-- **`UserSettings`** — chave fixa `Id = 1` e `SaveDiagnosticHistory`, inicializada como `true`.
+## Tabelas
 
-`SqliteDiagnosticRunRepository` serializa/deserializa os modelos com `System.Text.Json`; `SqliteUserSettingsRepository` carrega/salva a preferência. O caso de uso consulta a configuração a cada execução e só persiste quando o histórico está habilitado. Falha de persistência não descarta o inventário já apresentado e gera aviso técnico no app.
+- **`DiagnosticRuns`** — ID, data de conclusão para ordenação e JSON com execução/inventário/relatório do scanner.
+- **`UserSettings`** — preferência local `SaveDiagnosticHistory`.
+- **`KnowledgeRules`** — uma linha por `RuleId` + `RuleVersion`; guarda versão do pacote, payload declarativo JSON e data de importação. Os payloads anteriores são preservados; regra com mesmo ID/versão e conteúdo diferente é recusada.
+- **`KnowledgeBaseVersions`** — versão do pacote, origem declarada, SHA-256 do arquivo JSON, quantidade de regras e data de importação. O hash permite detectar repetição/conflito de conteúdo; não certifica assinatura, autoria nem validade de referência.
+- **`RepairHistory`** — proposta, status, risco declarado, confirmação, suporte a rollback, horários e detalhes limitados. Não há coluna de comando/script.
+
+## Importação e uso
+
+O schema do JSON é estrito e limitado: versão do schema, versão do pacote e regras com campos conhecidos, limite de tamanho/contagem/texto e referências HTTPS. A importação só armazena conteúdo como dados. Não há execução de código, download automático de referências, plugin dinâmico ou regra factual sem importação explícita.
+
+`RecommendationEngine` lê a versão mais recente de cada regra por ID; histórico de versões continua no SQLite. Não há regras semeadas nesta entrega. Uma recomendação preserva o identificador/versão da regra, os scanners e as evidências literais que corresponderam.
 
 ## Dados e privacidade
 
-O payload pode incluir nome e fabricante/modelo/série do computador, Windows/build, CPU/RAM/GPU, modelos e capacidade de discos físicos, volumes/BIOS, estado de TPM e Secure Boot, usuário/domínio, endereços IPv4/IPv6 e adaptadores. São dados locais, mas alguns identificam usuário ou dispositivo. A preferência pode impedir novas gravações em **Configurações**; desligá-la não apaga execuções existentes. Exclusão do histórico ainda não está disponível.
+O payload histórico existente pode conter nome/modelo/série do computador, usuário/domínio, endereços de rede, identificadores de dispositivos e mensagens de eventos. Evidências em relatórios podem repetir essas informações. Regras importadas guardam também suas referências e descrições. A origem e o conteúdo de um pacote devem ser revisados antes da importação.
 
-SQLite por si só **não garante criptografia em repouso**. Não armazenar senhas, tokens ou chaves no banco ou nos logs. Dados de diagnóstico não são enviados a serviços externos pelo Milestone 1.
-
-## Limites e evolução
-
-`EnsureCreated` é adequado apenas ao schema inicial; alterações futuras requerem migrações EF Core sequenciais, testadas com bancos existentes antes da publicação. Também devem ser definidos retenção, remoção, backup/recuperação, comportamento multiusuário e eventual proteção em repouso antes de ampliar o histórico.
+Desabilitar **Salvar diagnósticos no histórico local** impede novas gravações de diagnósticos; não apaga registros existentes. A auditoria de reparo é local. SQLite não fornece criptografia em repouso por si só; não armazenar senhas, tokens ou chaves. Rotina de retenção, exportação e exclusão de histórico ainda não está implementada.

@@ -10,6 +10,8 @@ using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Database;
 using WindowsDoctorAI.Diagnostics;
 using WindowsDoctorAI.Infrastructure;
+using WindowsDoctorAI.Reporting;
+using WindowsDoctorAI.Repair;
 
 namespace WindowsDoctorAI.App;
 
@@ -42,6 +44,13 @@ public partial class App : Application
                     services.AddWindowsDoctorInfrastructure(databasePath);
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();
                     services.AddTransient<RunComputerInventoryDiagnosticUseCase>();
+                    services.AddSingleton<RecommendationEngine>();
+                    services.AddSingleton<RootCauseAnalyzer>();
+                    services.AddSingleton<HtmlDiagnosticReportFormatter>();
+                    services.AddTransient<DiagnosticAssessmentService>();
+                    services.AddTransient<KnowledgeJsonImporter>();
+                    services.AddTransient<RepairEngine>();
+                    services.AddSingleton<IRepairCatalog, EmptyRepairCatalog>();
                     services.AddSingleton<INavigationService, NavigationService>();
                     services.AddTransient<MainWindow>();
                     services.AddTransient<HomeViewModel>();

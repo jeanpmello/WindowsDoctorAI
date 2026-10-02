@@ -1,61 +1,65 @@
 # Arquitetura
 
-**Estado:** Milestones 1 e 2 têm implementação no repositório. A compilação e a execução da UI e das consultas dependentes do Windows ainda precisam ser validadas em Windows; este documento não representa certificação.
+**Estado:** Milestones 1–2 e os componentes centrais do Milestone 3 estão implementados no repositório. A execução WinUI 3, compilação XAML e APIs nativas ainda precisam de validação em Windows; este documento não representa certificação.
 
-## Visão geral
+## Produto e fronteira arquitetural
 
-Windows Doctor AI é uma aplicação desktop WinUI 3, C#/.NET 9, organizada em Clean Architecture. O domínio define inventário e resultados diagnósticos comuns; `Core` contém portas; `Application` orquestra o inventário e o Diagnostic Engine; `Diagnostics` implementa os plugins locais de leitura; `Reporting` formata relatórios; e a aplicação WinUI compõe dependências e apresenta o estado.
+**Windows Doctor AI Core** é a aplicação desktop local para técnicos: inventário, diagnóstico de leitura, conhecimento importado localmente, análise explicável, relatórios e, no futuro, reparos explicitamente aprovados. Os dados permanecem no computador salvo ação deliberada do usuário.
+
+**Windows Doctor AI Enterprise** é uma edição futura separada, prevista para agente leve, servidor central e painel web de inventário/monitoramento. Não há agente, servidor, tenant, sincronização, identidade corporativa, API central nem telemetria nesta implementação. A separação é uma decisão de roadmap, não uma arquitetura já entregue.
 
 ```text
 WindowsDoctorAI.sln
-├── src/
-│   ├── WindowsDoctorAI.App/             # WinUI 3, MVVM, composição e dashboard
-│   ├── WindowsDoctorAI.Core/            # IDiagnosticScanner, IDiagnosticEngine e portas
-│   ├── WindowsDoctorAI.Domain/          # Inventário, DiagnosticResult e DiagnosticReport
-│   ├── WindowsDoctorAI.Application/     # DiagnosticEngine e caso de uso coordenador
-│   ├── WindowsDoctorAI.Diagnostics/    # Plugins e adaptador local de APIs Windows
-│   ├── WindowsDoctorAI.Reporting/      # Formatadores de relatório em texto
-│   ├── WindowsDoctorAI.Database/       # DbContext EF Core e repositórios SQLite
-│   ├── WindowsDoctorAI.Infrastructure/ # Composição dos adaptadores SQLite
-│   ├── WindowsDoctorAI.AI/             # Integração opcional, sem provedor ativo
-│   └── WindowsDoctorAI.Repair/          # Catálogo sem executor de reparos
-└── tests/WindowsDoctorAI.Tests/         # xUnit e testes SQLite em memória
+├── WindowsDoctorAI.App             # desktop WinUI 3, DI e apresentação
+├── WindowsDoctorAI.Domain          # inventário, resultados, conhecimento e auditoria
+├── WindowsDoctorAI.Core            # portas de scanners, persistência e auditoria
+├── WindowsDoctorAI.Application     # diagnóstico, importação, recomendações e composição
+├── WindowsDoctorAI.Diagnostics     # plugins locais Windows somente de leitura
+├── WindowsDoctorAI.Database        # EF Core, SQLite, repositórios e schema versionado
+├── WindowsDoctorAI.Reporting       # relatórios de texto e HTML local
+├── WindowsDoctorAI.Repair          # contratos de plugin e barreira de confirmação
+├── WindowsDoctorAI.Infrastructure  # composição de adaptadores locais
+└── tests/WindowsDoctorAI.Tests     # xUnit, lógica pura e SQLite
 ```
 
-## Contrato e execução
+As dependências continuam apontando para contratos e domínio. `Domain` não conhece WinUI, banco, APIs Windows ou serviços externos. Scanners ficam isolados atrás de contratos substituíveis.
 
-`DiagnosticResult` fornece o formato compartilhado `ScannerName`, `Category`, `Severity`, `Status`, `Title`, `Description`, `Recommendation`, `Evidence`, `Duration` e `Timestamp`. `IDiagnosticScanner` é o contrato dos plugins, e `IDiagnosticEngine` coordena todos os scanners registrados no contêiner de dependências.
+## Diagnóstico e Health Score
 
-O engine inicia em paralelo os plugins que declaram `SupportsParallelExecution`; os que não declaram segurança concorrente executam sequencialmente. Uma falha de plugin produz um resultado `Unavailable`, é registrada e não interrompe os demais. O engine normaliza nome/categoria, substitui duração e horário pelos valores medidos e consolida resultados em `DiagnosticReport`.
+`DiagnosticResult` representa a coleta dos scanners; `Unavailable` e `NotVerified` não são estados saudáveis. O Health Score existente é heurístico: 100 menos 25 por achado crítico e 8 por aviso, limitado a 0–100, e não é calculado quando não há verificações confirmadas. Não é uma medida de saúde global.
 
-Estados `Unavailable` e `NotVerified` não são tratados como saúde nem entram no Health Score. O score desta etapa usa a regra explícita **100 − 25 por achado crítico − 8 por aviso**, limitada a 0–100; só é exibido se ao menos uma verificação tiver sido confirmada. É uma métrica heurística desta etapa, não uma garantia de saúde global. A cobertura por categoria indica verificações incompletas. Os scanners atuais cobrem Sistema, Drivers e Hardware; Rede e Segurança aparecem como não verificadas, pois não há plugins desses domínios neste milestone.
+Os plugins existentes consultam Windows Update, Services, Drivers, Disk e Event Viewer em modo de leitura. Os limites específicos de APIs, permissões, SMART, cobertura e volume permanecem descritos nos resultados e na documentação do Milestone 2.
 
-## Plugins incluídos e limites da coleta
+## Knowledge Engine e recomendações
 
-Os plugins são registrados em `AddWindowsDiagnosticPlugins` no assembly de diagnósticos. O conjunto atual é: Windows Update (busca do Windows Update Agent, marcadores de reinicialização e eventos recentes); Services (serviços centrais, inicialização, estados automáticos parados e dependências); Drivers (códigos de configuração Plug and Play, inclusive código 28); Disk (SMART, status geral de disco, espaço livre e temperatura SMART quando a interface expõe o atributo); e Event Viewer (logs System, Application e Windows Update).
+`KnowledgeRule` modela identificador e versão, domínio, título, impacto, códigos, sintomas, causas, soluções e referências HTTPS. O importador aceita somente o schema JSON `1.0`, com tamanho máximo de 512 KiB, até 500 regras, até 50 itens por lista, limites de texto, enum textual, referências HTTPS e rejeição de propriedades não mapeadas. Caminhos locais, controles e padrões de comando/injeção são rejeitados. O JSON contém dados declarativos; nunca é interpretado como código, script, caminho de execução ou comando.
 
-As consultas dependem de APIs e componentes locais do Windows: Windows Update Agent/COM e Registro, WMI (`Win32_Service`, `Win32_PnPEntity`, classes de disco/SMART) e Windows Event Log. Falta de permissão, classe ausente, controladora ou hardware sem suporte resulta em `Unavailable` ou `NotVerified`; não é convertido em resultado saudável. O caminho de temperatura usa atributos SMART ATA 190/194 quando legíveis e não aplica um limite universal por modelo.
+Não há regras semeadas no banco, inclusive para `0x80070005`; esse identificador só poderá gerar recomendação quando uma regra for explicitamente importada com referências declaradas. O hash SHA-256 identifica o conteúdo importado e permite idempotência, mas **não autentica** a origem. O aplicativo não verifica automaticamente se a URL ou a alegação da regra é confiável.
 
-Para limitar o volume, a análise do Event Viewer lê eventos Critical, Error e Warning dos três logs nos últimos sete dias, até 100 registros recentes por log. O Windows Update procura eventos recentes no log operacional dos últimos 14 dias, até 100 registros. Espaço livre abaixo de 10% gera achado crítico e abaixo de 20% gera aviso; são limiares operacionais gerais. Serviços parados por gatilho, dispositivos desativados/não conectados e estados sem classificação não são automaticamente tratados como falhas.
+`RecommendationEngine` só considera resultados com status `Finding`. Ele procura um código literal ou termo de sintoma na evidência coletada, liga cada sugestão aos scanners/trechos que deram match e ordena pelo impacto informado na regra. Confiança é categórica e expressa força da correspondência: texto de sintoma é fraco; código exato em um scanner é moderado; código exato em scanners distintos pode ser forte. Isso não é porcentagem, causalidade, probabilidade de correção nem validação da fonte. Impacto também é metadado declarado pela regra, não uma medição automática.
 
-A coleta é local e somente de leitura: não instala atualizações ou drivers, não inicia/para serviços, não modifica o Registro nem apaga arquivos. Recomendações descrevem revisão manual e não são executadas.
+## Correlação e explicação
 
-## Extensão segura
+`RootCauseAnalyzer` agrupa somente identificadores reconhecíveis repetidos entre fontes de scanner diferentes: referências KB, HRESULTs, IDs explícitos de eventos, IDs de dispositivo e nomes `Nome=` explicitamente observados pelo scanner de serviços. A explicação aponta os resultados originais e o identificador compartilhado. Um identificador coincidente é associação textual, não prova de causa, ordem temporal ou nexo entre update/driver/serviço/evento. Nesta versão `CauseDetermined` permanece falso; sem identificadores suficientes, a causa é indeterminada.
 
-Um plugin implementa `IDiagnosticScanner`, retorna a lista comum de `DiagnosticResult` e declara se pode executar em paralelo. Os módulos registrados pelo agregador `AddWindowsDiagnosticPlugins` são resolvidos automaticamente pelo engine via `IEnumerable<IDiagnosticScanner>`. Um novo domínio pode ser implementado em outro módulo/projeto e ligado ao agregador de plugins sem modificar `Core`, o `DiagnosticEngine`, o caso de uso ou a implementação do app; o app mantém uma única chamada ao registro do conjunto de diagnósticos.
+O modelo atual do scanner não fornece uma timeline confiável de eventos históricos entre fontes. Timeline, análise temporal robusta, comparação entre execuções e recomendações causais ficam para outra etapa, após fonte e semântica temporal estruturadas.
 
-Essa extensão permite planejar módulos independentes para SQL Server, Exchange, VMware, Docker, Microsoft 365 ou Proxmox, com contratos de dados e permissões próprios. Esta etapa **não** carrega DLLs arbitrárias de diretórios: plugins são código confiável explicitamente incluído e registrado, não executáveis descobertos automaticamente em disco.
+## Relatórios
 
-## Dashboard, relatório e histórico
+`DiagnosticAssessmentService.CreateHtmlReportAsync` reúne o relatório da execução, recomendações do banco local, correlações e histórico de propostas de reparo. O HTML inclui resumo, Health Score, cobertura/resultados, evidências, impacto/confiança explicados, referências declaradas e histórico. A renderização codifica texto não confiável e não carrega scripts ou estilos remotos.
 
-O caso de uso executa o scanner de inventário existente e o Diagnostic Engine, preserva o inventário e agrega o `DiagnosticReport` na execução. O dashboard exibe score calculado ou não calculado, achados críticos, avisos, duração, última execução, cobertura e evidências. A tela limita os achados mostrados a dez; o formatador `DiagnosticReportFormatter` mantém os resultados completos para geração de texto.
+O serviço HTML está disponível na camada de aplicação, mas ainda não existe fluxo de exportação/seleção de arquivo na interface WinUI. Não há geração PDF nesta entrega; imprimir/salvar como PDF no navegador é uma opção externa, não uma capacidade implementada. Relatórios podem conter evidências locais potencialmente identificáveis; compartilhamento e retenção exigem decisão do usuário.
 
-O SQLite continua sem mudança de schema: o JSON da execução agora inclui o relatório. Registros antigos do Milestone 1, que não contêm `Report`, continuam úteis para o inventário; o dashboard informa que não há score diagnóstico calculável, sem reaproveitar o antigo valor demonstrativo como saúde real.
+## Framework de reparos
 
-## Limites e validação pendente
+`RepairEngine` recebe plugins confiáveis registrados em código, exige confirmação booleana explícita para executar ou tentar rollback e grava cada tentativa na auditoria SQLite. O plugin inerte de demonstração e os fakes dos testes não alteram o Windows. A composição do desktop não registra nenhum `IRepairPlugin`; portanto, não há reparo de sistema disponível nem comando/processo executado neste milestone. A importação JSON não pode registrar plugin.
+
+A interface prevê risco, impacto, confirmação e suporte opcional a rollback. Um plugin real futuro exigirá revisão própria de pré-condições, efeito, privilégios, ponto de restauração quando viável, logs sem segredos e testes Windows; a existência do contrato não autoriza sua implementação ou execução.
+
+## Validação pendente
 
 - Compilar a solution e validar XAML/WinUI com Windows App SDK em Windows.
-- Exercitar WUA, Registro, WMI, Event Viewer, SMART e permissões em diferentes versões/edições e hardware Windows.
-- Medir falsos positivos dos limites gerais de espaço, lista de serviços centrais e telemetria SMART em máquinas representativas.
-- Testar exportação/retensão de relatórios e histórico com política de privacidade explícita.
-- Knowledge Base, análise por IA e reparos continuam fora deste milestone.
+- Exercitar WUA, Registro, WMI, Event Viewer, SMART e permissões em versões e hardware representativos.
+- Validar regras importadas com fontes reconhecidas, processo de revisão e critérios de impacto/confiança.
+- Definir interface de importação/exportação HTML, retenção/remoção e política de privacidade para relatórios.
+- Projetar identidade, autorização, transporte, auditoria e proteção de dados separadamente antes de qualquer edição Enterprise.

@@ -43,3 +43,17 @@ public interface IUserSettingsRepository
     Task<UserSettings> GetAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(UserSettings settings, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Persistência local de regras; a implementação preserva versões anteriores e origem declarada.</summary>
+public interface IKnowledgeRepository
+{
+    Task<IReadOnlyList<KnowledgeRule>> GetLatestRulesAsync(CancellationToken cancellationToken = default);
+    Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Registro de auditoria local das propostas confirmadas ou recusadas.</summary>
+public interface IRepairAuditLog
+{
+    Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default);
+}

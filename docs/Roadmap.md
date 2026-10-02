@@ -1,49 +1,46 @@
 # Roadmap
 
-Este roadmap distingue código implementado de validações ainda pendentes. Compatibilidade e critérios devem ser revistos a cada etapa.
+Este roadmap distingue componentes implementados de integração visual, validação e funcionalidades ainda futuras. Código presente não equivale a milestone validado em Windows ou aceito para produção.
 
-## Milestone 1 — Fundação e inventário (código implementado)
+## Milestone 1 — Fundação e inventário (implementado)
 
-**Entregue no repositório**
+- Solution .NET 9 em Clean Architecture e desktop WinUI 3/MVVM.
+- Inventário local, configurações, SQLite e testes.
+- IA e reparos sem provedor/executor ativo.
 
-- Solution .NET 9 e projetos em Clean Architecture.
-- Dashboard WinUI 3 com navegação Inicial/Sobre/Configurações, MVVM Toolkit, Dependency Injection, Logging e Configuration.
-- Scanner de inventário local; modelo inclui sistema/hardware, BIOS, UEFI, TPM, Secure Boot, usuário/domínio, rede e uptime.
-- Persistência local SQLite opcional, repositórios EF Core e testes unitários/de SQLite.
-- IA e reparos sem provedor ou executor ativado.
+## Milestone 2 — Diagnostic Engine (implementado; validação Windows pendente)
 
-Registros históricos deste milestone podem conter score demonstrativo fixo em 95. O dashboard novo não o apresenta como saúde calculada.
+- Modelo `DiagnosticResult`, contratos e plugins para Windows Update, Services, Drivers, Disk e Event Viewer.
+- Execução paralela conforme segurança declarada, isolamento de falhas, medição e Health Score heurístico.
+- Dashboard, cobertura, evidências, persistência do relatório e testes com fontes substitutas.
+- Scanners somente de leitura; sem modificações de sistema.
 
-## Milestone 2 — Diagnostic Engine (código implementado)
+Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, SMART e hardware em Windows.
 
-**Entregue no repositório**
+## Milestone 3 — Knowledge & Repair Platform (base implementada; integração/validação pendentes)
 
-- Modelo compartilhado `DiagnosticResult`, porta `IDiagnosticScanner`, `IDiagnosticEngine` e resumo consolidado.
-- Plugins registrados para Windows Update, Services, Drivers, Disk e Event Viewer; execução concorrente apenas quando permitida, duração medida e falhas isoladas.
-- Score heurístico baseado em achados observados; indisponibilidade e dados não verificados não são considerados saudáveis.
-- Dashboard com score calculado/não calculado, problemas críticos, avisos, duração, última execução, cobertura por categoria e evidências.
-- Formatador textual do relatório e persistência do resumo junto ao inventário sem alterar o schema SQLite.
-- Consultas locais somente de leitura. Sem reparos, Knowledge Base ou geração de achados/evidências simulados em produção.
+- Modelo de regra com ID/versão, domínio, erros, sintomas, causas, soluções, impacto e referências.
+- Importador JSON de schema estrito e limitado; conteúdo é inerte, exige HTTPS em referências e nunca pode registrar comandos/plugins.
+- SQLite `PRAGMA user_version = 1`, migração incremental compatível com o schema anterior, histórico de pacotes por hash e versões de regra sem sobrescrita silenciosa.
+- Recommendation Engine que liga achados a códigos/sintomas literais, apresenta evidências, impacto declarado e confiança categórica explicada. Sem regra semeada como fato; nenhuma probabilidade artificial.
+- Root Cause Analyzer de associações observacionais por identificadores compartilhados. Não determina causa nem sequência temporal.
+- Repair Engine com contratos de plugins confiáveis registrados em código, confirmação, risco, auditoria e rollback opcional. A composição não registra reparos reais; plugin de teste/demo é inerte.
+- Serviço para relatório HTML local com resumo, Health Score, evidências, recomendações, fontes declaradas e histórico de propostas; saída codificada e sem scripts remotos.
+- Testes de unidade e migração SQLite para regras, validação, correspondência, correlação, confirmação, auditoria e HTML.
 
-**Validações que faltam antes de considerar o milestone aceito em runtime**
+Não incluído: PDF gerado no app, tela de importação/exportação na WinUI, plugin que modifique o Windows ou regras oficiais preinstaladas. Validação XAML/WinUI e testes em Windows permanecem pendentes.
 
-- Compilar a solution e validar XAML/WinUI com Windows App SDK em Windows.
-- Exercitar Windows Update Agent, Registro, WMI, Event Viewer e permissões em versões/edições Windows representativas.
-- Confirmar SMART, saúde e temperaturas em hardware/controladoras diferentes, e ajustar limiares/lista de serviços conforme evidência.
-- Revisar visualmente o dashboard e validar a execução/persistência do diagnóstico no Windows.
+## Próximas etapas de qualidade
 
-Os testes de unidade usam fontes falsas em memória e cobrem lógica, falhas e estados indisponíveis; não demonstram que APIs Windows ou hardware real foram exercitados.
+- Definir experiência da interface para importar pacote revisado e salvar/exportar relatório HTML.
+- Definir origem assinada/proveniência e critérios revisados para impacto e confiança; avaliar regras com evidência de fontes reconhecidas.
+- Exercitar migração em cópia de bancos usados, incluindo rollback da atualização de schema.
+- Definir retenção, remoção, compartilhamento e eventual proteção em repouso para relatórios/histórico.
 
-## Próximas etapas — base de conhecimento e qualidade
+## Visões futuras (fora do Milestone 3)
 
-- Projetar uma Knowledge Base versionada e explicável, com fontes, limites de confiança e sem executar reparos.
-- Validar falsos positivos e critérios de gravidade com logs e hardware reais, sem gravar evidências de teste como achados de produção.
-- Criar migrações EF Core antes de mudanças futuras no schema; o Milestone 2 mantém o schema e evolui o JSON da execução.
-- Formalizar retenção, revisão e remoção do histórico e minimização de dados pessoais em relatórios.
-
-## Etapas futuras — plugins, reparos assistidos e IA
-
-- Adicionar plugins confiáveis para SQL Server, Exchange, VMware, Docker, Microsoft 365, Proxmox ou outros domínios, com permissões próprias.
-- Propor reparos catalogados apenas após requisitos próprios e aprovação explícita por ação; nenhuma execução automática.
-- Tornar análise por IA opcional, com consentimento, minimização de dados e saída não executável.
-- Definir identidade, acesso, auditoria, implantação, retenção e requisitos organizacionais antes de gestão em escala.
+- **AI Assistant:** explicação opcional, com consentimento e minimização, apoiada em coleta local disponível; não apresentada como diagnóstico certo.
+- **Timeline:** sequência histórica só após fontes estruturadas e timestamps confiáveis.
+- **Comparador de diagnósticos:** diferenças entre execuções e estado de score/checagens, sem usar comparação como prova de causa.
+- **Dashboard corporativo / Enterprise:** agente leve, servidor e painel para múltiplos computadores. Separado do desktop Core e sujeito a arquitetura própria de identidade, acesso, privacidade e auditoria.
+- Plugins diagnósticos adicionais e reparos reais são decisões separadas, com permissões e validação próprias.

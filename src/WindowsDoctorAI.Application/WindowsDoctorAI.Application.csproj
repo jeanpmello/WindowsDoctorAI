@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="../WindowsDoctorAI.Core/WindowsDoctorAI.Core.csproj" />
     <ProjectReference Include="../WindowsDoctorAI.Domain/WindowsDoctorAI.Domain.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Reporting/WindowsDoctorAI.Reporting.csproj" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
   </ItemGroup>
 </Project>

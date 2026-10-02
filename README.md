@@ -1,50 +1,45 @@
 # Windows Doctor AI
 
-Aplicativo desktop Windows em WinUI 3/.NET 9 para inventário local e diagnóstico assistido. Os Milestones 1 e 2 têm código implementado; execução visual e consultas dependentes do Windows ainda precisam de validação em uma máquina Windows.
+Aplicativo desktop para Windows em WinUI 3/.NET 9, organizado para diagnóstico local e recuperação assistida. Milestones 1–2 e os componentes centrais do Milestone 3 estão no código; execução visual, APIs Windows e aceitação final ainda exigem validação em uma máquina Windows.
 
 ## O que está incluído
 
-- Solution em Clean Architecture com projetos independentes em `src/` e testes em `tests/`.
-- App WinUI 3 com telas Inicial, Sobre e Configurações, MVVM Toolkit, Dependency Injection, logging, configuração e SQLite local opcional.
-- Scanner de inventário do computador e cinco plugins somente de leitura: Windows Update, Services, Drivers, Disk e Event Viewer.
-- Modelo comum de resultado, execução paralela quando segura, medição por scanner, isolamento de falhas e consolidação para dashboard e relatório textual.
-- Dashboard com Health Score calculado quando existem verificações confirmadas, problemas críticos, avisos, duração, última execução, cobertura por categoria e evidências.
-- Inventário do Milestone 1 preservado no dashboard e no histórico. Registros antigos sem resultados do engine continuam carregáveis, mas não recebem score diagnóstico calculado.
-- IA sem provedor ativo, e nenhum executor de reparo; não instala atualizações/drivers, altera serviços/Registro nem remove arquivos.
+- Clean Architecture, app WinUI 3/MVVM, inventário local, configurações, logging e SQLite.
+- Cinco scanners de leitura: Windows Update, Services, Drivers, Disk e Event Viewer; falhas e estados indisponíveis não são tratados como saúde.
+- Health Score heurístico existente: 100 menos 25 por achado crítico e 8 por aviso, limitado a 0–100; não é calculado sem checagens confirmadas e não representa saúde global.
+- Knowledge Engine com modelo de regras e versões, banco SQLite versionado, importador JSON estrito e limitado, Recommendation Engine explicável e Root Cause Analyzer conservador.
+- Framework de plugins de reparo com confirmação, risco, auditoria e rollback opcional. **Nenhum plugin que altere o Windows está registrado; não executa comandos, scripts ou mudanças neste milestone.**
+- Serviço para gerar relatório HTML local com resumo, score, evidências, correlações, recomendações e histórico de propostas. A interface de exportação ainda não está ligada à WinUI; PDF não é gerado pelo app.
+- IA sem provedor ativo. Nenhum inventário é enviado a serviço externo.
 
-O score desta etapa é heurístico: 100 menos 25 por achado crítico e 8 por aviso, limitado a 0–100. Se nenhuma verificação for confirmada, o score é “Não calculado”. Dados indisponíveis ou não verificados não contam como estado saudável. As consultas dependem de APIs e permissões Windows; SMART e temperatura variam por hardware/controlador. Rede e Segurança ainda não têm scanners no Milestone 2 e aparecem como não verificadas.
+Knowledge Base começa vazia. Não há regra confirmada semeada para `0x80070005` ou outros códigos. Impacto e referências são declarados pelo pacote importado; o app não valida automaticamente a fonte. Confiança é uma categoria de força do match literal, não uma probabilidade de causa ou sucesso. O Root Cause Analyzer só aponta identificadores compartilhados e nunca declara causa determinada.
 
 ## Estrutura
 
 ```text
 WindowsDoctorAI.sln
 ├── src/
-│   ├── WindowsDoctorAI.App/            # WinUI 3, MVVM, composição e dashboard
-│   ├── WindowsDoctorAI.Core/           # IDiagnosticScanner, IDiagnosticEngine e portas
-│   ├── WindowsDoctorAI.Domain/         # Inventário, resultados, relatório e execução
-│   ├── WindowsDoctorAI.Application/    # Diagnostic Engine e caso de uso
-│   ├── WindowsDoctorAI.Diagnostics/    # Plugins e adaptadores locais Windows
-│   ├── WindowsDoctorAI.Reporting/      # Formatadores de relatório textual
-│   ├── WindowsDoctorAI.Infrastructure/# Registro de adaptadores
-│   ├── WindowsDoctorAI.Database/      # EF Core, SQLite e repositórios
-│   ├── WindowsDoctorAI.Repair/         # Catálogo sem executor de reparos
-│   └── WindowsDoctorAI.AI/             # Contrato opcional; sem provedor
-└── tests/WindowsDoctorAI.Tests/        # Testes unitários e integração SQLite
+│   ├── WindowsDoctorAI.App/             # desktop WinUI 3, MVVM e composição
+│   ├── WindowsDoctorAI.Core/            # portas de diagnóstico e persistência
+│   ├── WindowsDoctorAI.Domain/          # inventário, regras, resultados e auditoria
+│   ├── WindowsDoctorAI.Application/     # scanners orquestrados, conhecimento e avaliação
+│   ├── WindowsDoctorAI.Diagnostics/    # plugins locais de leitura
+│   ├── WindowsDoctorAI.Reporting/      # relatórios em texto e HTML
+│   ├── WindowsDoctorAI.Database/       # EF Core, SQLite e schema versionado
+│   ├── WindowsDoctorAI.Infrastructure/# composição de adaptadores locais
+│   ├── WindowsDoctorAI.Repair/         # framework; sem executor de sistema ativo
+│   └── WindowsDoctorAI.AI/             # contrato opcional; sem provedor
+└── tests/WindowsDoctorAI.Tests/        # testes xUnit e integração SQLite
 ```
 
-Consulte [PROJECT_RULES.md](PROJECT_RULES.md), [CONTRIBUTING.md](CONTRIBUTING.md), [docs/Architecture.md](docs/Architecture.md) e [docs/Roadmap.md](docs/Roadmap.md).
+**Core** é desktop/local. **Enterprise** (agente + servidor central + painel multi-máquina) é apenas roadmap e não está implementado. Consulte [Architecture](docs/Architecture.md), [Roadmap](docs/Roadmap.md), [Security](docs/Security.md), [Database](docs/Database.md), [PROJECT_RULES.md](PROJECT_RULES.md) e [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Pré-requisitos
+## Pré-requisitos e execução em Windows
 
-- Windows 10 (build mínimo de plataforma `10.0.17763.0`) ou Windows 11 para executar a UI e consultar Windows Update, Registro, WMI e Event Viewer.
-- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) e conexão à internet na primeira restauração dos pacotes NuGet.
-- Visual Studio 2022 atualizado com ferramentas para desenvolvimento desktop .NET recomendadas para WinUI 3 (alternativamente, SDK .NET e Windows App SDK restaurados via NuGet).
+- Windows 10 (build mínimo `10.0.17763.0`) ou Windows 11 para UI e consultas nativas.
+- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) e Visual Studio 2022 com ferramentas WinUI/Desktop recomendadas.
 
-A solução foi solicitada em .NET 9. A política da Microsoft informa fim de suporte do .NET 9 em 10 de novembro de 2026; o alvo deverá ser reavaliado antes de uma versão de produção.
-
-## Compilar e executar no Windows
-
-Na raiz do repositório, em PowerShell ou Developer Command Prompt:
+Na raiz do repositório, em PowerShell:
 
 ```powershell
 dotnet restore .\WindowsDoctorAI.sln
@@ -53,17 +48,17 @@ dotnet test .\tests\WindowsDoctorAI.Tests\WindowsDoctorAI.Tests.csproj --configu
 dotnet run --project .\src\WindowsDoctorAI.App\WindowsDoctorAI.App.csproj --configuration Release
 ```
 
-Ao abrir, selecione **Iniciar Diagnóstico** na tela Inicial. O app cria o banco `windowsdoctorai.db` em `%LOCALAPPDATA%\WindowsDoctorAI\`. O schema inicial continua sendo criado com `EnsureCreated`; migrações versionadas ainda não existem.
+O banco `windowsdoctorai.db` é criado em `%LOCALAPPDATA%\WindowsDoctorAI\`. Schema version 1 acompanha as tabelas de conhecimento e auditoria e atualiza bancos anteriores sem substituir histórico existente.
 
 ## Testes e limites
 
-A suíte usa fontes falsas em memória e SQLite para verificar score, paralelismo, falhas isoladas, normalização, filtros dos cinco plugins, estados indisponíveis, formatação e persistência. Ela não prova que Windows Update, WMI, SMART ou Event Viewer foram exercitados em hardware real.
+Testes unitários cobrem lógica, importação, matches, correlações, confirmação e HTML; testes SQLite cobrem persistência e atualização do schema. Fontes falsas não provam que WUA, WMI, SMART, XAML/WinUI ou Event Viewer funcionem em hardware real.
 
-No Linux, é possível executar os testes .NET e compilar as bibliotecas multiplataforma. A validação de XAML/WinUI depende do compilador XAML do Windows (`XamlCompiler.exe`) e deve ser feita em Windows; este ambiente não valida a execução da interface nem das APIs nativas.
+No Linux é possível testar bibliotecas e SQLite com .NET 9. A validação de XAML depende do compilador do Windows App SDK; build/execução da UI e APIs nativas devem ser verificados em Windows. A edição Enterprise, timeline, comparador, dashboard corporativo, assistente IA e reparos reais continuam no roadmap.
 
 ## Persistência e privacidade
 
-O histórico é ligado por padrão e grava localmente o inventário e o relatório, que podem conter nome/série do equipamento, usuário/IP, identificadores Plug and Play e mensagens dos eventos locais. Desative **Salvar diagnósticos no histórico local** para evitar novas gravações. Essa opção não apaga dados já salvos; remoção de histórico não faz parte deste milestone. SQLite não implica criptografia em repouso. Consulte [docs/Database.md](docs/Database.md) e [docs/Security.md](docs/Security.md).
+O histórico de diagnóstico é local e habilitado por padrão; pode conter nome/série do equipamento, usuário/IP, identificadores Plug and Play e mensagens de eventos. Relatórios HTML repetem evidências. Desativar o histórico impede novas gravações, mas não apaga registros existentes. SQLite não implica criptografia em repouso; consulte [Database](docs/Database.md) e [Security](docs/Security.md).
 
 ## Licença
 

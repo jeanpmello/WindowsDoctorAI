@@ -57,6 +57,113 @@ public sealed class SqliteUserSettingsRepository(WindowsDoctorDbContext dbContex
     }
 }
 
+public sealed class SqliteKnowledgeRepository(WindowsDoctorDbContext dbContext) : IKnowledgeRepository
+{
+    public async Task<IReadOnlyList<KnowledgeRule>> GetLatestRulesAsync(CancellationToken cancellationToken = default)
+    {
+        var entities = await dbContext.KnowledgeRules.AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
+        return entities
+            .GroupBy(entity => entity.RuleId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(entity => entity.RuleVersion).First())
+            .Select(entity => JsonSerializer.Deserialize<KnowledgeRule>(entity.PayloadJson, InventoryJson.Options))
+            .Where(rule => rule is not null)
+            .Cast<KnowledgeRule>()
+            .OrderBy(rule => rule.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sha256);
+        var existingPackage = await dbContext.KnowledgeBaseVersions.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Version == package.Version, cancellationToken).ConfigureAwait(false);
+        if (existingPackage is not null)
+        {
+            if (!string.Equals(existingPackage.Sha256, sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"A versão de base '{package.Version}' já existe com conteúdo diferente.");
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        foreach (var rule in package.Rules)
+        {
+            var payload = JsonSerializer.Serialize(rule, InventoryJson.Options);
+            var previous = await dbContext.KnowledgeRules.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.RuleId == rule.Id && item.RuleVersion == rule.Version, cancellationToken)
+                .ConfigureAwait(false);
+            if (previous is not null)
+            {
+                if (!string.Equals(previous.PayloadJson, payload, StringComparison.Ordinal))
+                    throw new InvalidOperationException($"A regra {rule.Id} v{rule.Version} já existe com conteúdo diferente; incremente a versão da regra.");
+                continue;
+            }
+            dbContext.KnowledgeRules.Add(new KnowledgeRuleEntity
+            {
+                RuleId = rule.Id,
+                RuleVersion = rule.Version,
+                PackageVersion = package.Version,
+                PayloadJson = payload,
+                ImportedAtUnixMilliseconds = now
+            });
+        }
+
+        dbContext.KnowledgeBaseVersions.Add(new KnowledgeBaseVersionEntity
+        {
+            Version = package.Version,
+            Source = package.Source,
+            Sha256 = sha256,
+            RuleCount = package.Rules.Count,
+            ImportedAtUnixMilliseconds = now
+        });
+        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
+public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRepairAuditLog
+{
+    public async Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        dbContext.RepairHistory.Add(new RepairHistoryEntity
+        {
+            Id = record.Id,
+            ProposalId = record.ProposalId,
+            Title = record.Title,
+            Status = record.Status,
+            Risk = record.Risk,
+            UserConfirmed = record.UserConfirmed,
+            RollbackSupported = record.RollbackSupported,
+            StartedAtUnixMilliseconds = record.StartedAtUtc.ToUnixTimeMilliseconds(),
+            CompletedAtUnixMilliseconds = record.CompletedAtUtc.ToUnixTimeMilliseconds(),
+            Details = record.Details.Length <= 2000 ? record.Details : record.Details[..2000]
+        });
+        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default)
+    {
+        var boundedCount = Math.Clamp(count, 1, 500);
+        var entities = await dbContext.RepairHistory.AsNoTracking()
+            .OrderByDescending(item => item.CompletedAtUnixMilliseconds)
+            .Take(boundedCount)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        return entities.Select(item => new RepairHistoryRecord(
+            item.Id,
+            item.ProposalId,
+            item.Title,
+            item.Status,
+            item.Risk,
+            item.UserConfirmed,
+            item.RollbackSupported,
+            DateTimeOffset.FromUnixTimeMilliseconds(item.StartedAtUnixMilliseconds),
+            DateTimeOffset.FromUnixTimeMilliseconds(item.CompletedAtUnixMilliseconds),
+            item.Details)).ToArray();
+    }
+}
+
 public static class DatabaseServiceCollectionExtensions
 {
     public static IServiceCollection AddWindowsDoctorDatabase(this IServiceCollection services, string databasePath)
@@ -68,6 +175,8 @@ public static class DatabaseServiceCollectionExtensions
         services.AddDbContext<WindowsDoctorDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IDiagnosticRunRepository, SqliteDiagnosticRunRepository>();
         services.AddScoped<IUserSettingsRepository, SqliteUserSettingsRepository>();
+        services.AddScoped<IKnowledgeRepository, SqliteKnowledgeRepository>();
+        services.AddScoped<IRepairAuditLog, SqliteRepairAuditLog>();
         return services;
     }
 
@@ -76,5 +185,63 @@ public static class DatabaseServiceCollectionExtensions
         await using var scope = services.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<WindowsDoctorDbContext>();
         await context.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context, cancellationToken).ConfigureAwait(false);
+    }
+}
+
+/// <summary>Schema local evolui em passos idempotentes; PRAGMA user_version identifica o último passo concluído.</summary>
+public static class WindowsDoctorDatabaseMigrator
+{
+    public const int CurrentVersion = 1;
+
+    public static async Task MigrateAsync(WindowsDoctorDbContext context, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        await context.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var command = context.Database.GetDbConnection().CreateCommand();
+            command.CommandText = "PRAGMA user_version;";
+            var version = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            if (version > CurrentVersion)
+                throw new InvalidOperationException($"O banco SQLite está na versão {version}, superior à versão suportada {CurrentVersion}.");
+            if (version == CurrentVersion) return;
+
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            await context.Database.ExecuteSqlRawAsync("""
+                CREATE TABLE IF NOT EXISTS "KnowledgeRules" (
+                    "RuleId" TEXT NOT NULL,
+                    "RuleVersion" INTEGER NOT NULL,
+                    "PackageVersion" TEXT NOT NULL,
+                    "PayloadJson" TEXT NOT NULL,
+                    "ImportedAtUnixMilliseconds" INTEGER NOT NULL,
+                    CONSTRAINT "PK_KnowledgeRules" PRIMARY KEY ("RuleId", "RuleVersion"));
+                CREATE INDEX IF NOT EXISTS "IX_KnowledgeRules_RuleId_RuleVersion" ON "KnowledgeRules" ("RuleId", "RuleVersion");
+                CREATE TABLE IF NOT EXISTS "KnowledgeBaseVersions" (
+                    "Version" TEXT NOT NULL CONSTRAINT "PK_KnowledgeBaseVersions" PRIMARY KEY,
+                    "Source" TEXT NOT NULL,
+                    "Sha256" TEXT NOT NULL,
+                    "RuleCount" INTEGER NOT NULL,
+                    "ImportedAtUnixMilliseconds" INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS "RepairHistory" (
+                    "Id" TEXT NOT NULL CONSTRAINT "PK_RepairHistory" PRIMARY KEY,
+                    "ProposalId" TEXT NOT NULL,
+                    "Title" TEXT NOT NULL,
+                    "Status" INTEGER NOT NULL,
+                    "Risk" INTEGER NOT NULL,
+                    "UserConfirmed" INTEGER NOT NULL,
+                    "RollbackSupported" INTEGER NOT NULL,
+                    "StartedAtUnixMilliseconds" INTEGER NOT NULL,
+                    "CompletedAtUnixMilliseconds" INTEGER NOT NULL,
+                    "Details" TEXT NOT NULL);
+                CREATE INDEX IF NOT EXISTS "IX_RepairHistory_CompletedAtUnixMilliseconds" ON "RepairHistory" ("CompletedAtUnixMilliseconds");
+                """, cancellationToken).ConfigureAwait(false);
+            await context.Database.ExecuteSqlRawAsync($"PRAGMA user_version = {CurrentVersion};", cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await context.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
     }
 }
