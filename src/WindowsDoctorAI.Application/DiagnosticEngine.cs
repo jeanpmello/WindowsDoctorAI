@@ -95,17 +95,17 @@ public sealed class DiagnosticEngine : IDiagnosticEngine
         {
             throw;
         }
-        catch (Exception exception)
+        catch (Exception)
         {
             timer.Stop();
             completedAt = DateTimeOffset.UtcNow;
-            _logger.LogError(exception, "O scanner {ScannerName} falhou; os demais scanners continuarão.", scanner.Name);
+            _logger.LogError("Um scanner falhou; detalhes omitidos por privacidade. Os demais scanners continuarão.");
             return
             [
                 NewResult(scanner, DiagnosticSeverity.Information, DiagnosticStatus.Unavailable,
                     "Scanner indisponível", "A execução deste plugin falhou; o resultado não permite concluir que o sistema está saudável ou com problema.",
                     "Revise a disponibilidade da fonte local, permissões e logs. Nenhuma alteração foi aplicada.",
-                    $"Falha isolada ({exception.GetType().Name}); não há evidência coletada.", timer.Elapsed, completedAt)
+                    "Falha isolada; não há evidência coletada.", timer.Elapsed, completedAt)
             ];
         }
     }

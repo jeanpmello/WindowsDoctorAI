@@ -43,9 +43,9 @@ public sealed partial class HomePage : Page
             var json = await FileIO.ReadTextAsync(file);
             await _viewModel.PreviewKnowledgePackageAsync(json);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _viewModel.ShowPackagePreviewError(exception.Message);
+            _viewModel.ShowPackagePreviewError("O pacote não pôde ser lido ou validado; detalhes omitidos por privacidade.");
         }
     }
 
@@ -69,9 +69,9 @@ public sealed partial class HomePage : Page
             await FileIO.WriteTextAsync(file, html);
             _viewModel.ReportHtmlSaved(file.Path);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _viewModel.ReportHtmlSaveFailed(exception.Message);
+            _viewModel.ReportHtmlSaveFailed("Falha ao salvar no destino escolhido.");
         }
     }
 

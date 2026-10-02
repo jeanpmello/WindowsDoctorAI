@@ -239,7 +239,7 @@ public sealed class MilestoneThreeTests
         verify.CommandText = "PRAGMA user_version;";
         Assert.Equal(WindowsDoctorDatabaseMigrator.CurrentVersion, Convert.ToInt32(await verify.ExecuteScalarAsync()));
         verify.CommandText = "SELECT \"SaveDiagnosticHistory\" FROM \"UserSettings\" WHERE \"Id\"=1;";
-        Assert.Equal(1L, (long)(await verify.ExecuteScalarAsync())!);
+        Assert.Equal(0L, (long)(await verify.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -267,7 +267,7 @@ public sealed class MilestoneThreeTests
     }
 
     [Fact]
-    public async Task AssessmentServiceComposesHtmlWithScoreEvidenceRecommendationsAndRepairHistory()
+    public async Task AssessmentServiceComposesHtmlWithoutUnscopedRepairHistory()
     {
         var now = DateTimeOffset.UtcNow;
         var run = new DiagnosticRun(Guid.NewGuid(), now.AddMinutes(-1), now, TimeSpan.FromMinutes(1), new ComputerInventory(),
@@ -278,7 +278,7 @@ public sealed class MilestoneThreeTests
         var audit = new InMemoryRepairAuditLog();
         await audit.SaveAsync(new RepairHistoryRecord(Guid.NewGuid(), "fixture.inert", "Proposta de teste", RepairExecutionStatus.Declined,
             RepairRiskLevel.Low, false, false, now, now, "Ação recusada; nenhuma alteração."));
-        var service = new DiagnosticAssessmentService(knowledge, audit, new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
+        var service = new DiagnosticAssessmentService(knowledge, new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
 
         var html = await service.CreateHtmlReportAsync(run);
 
@@ -286,8 +286,9 @@ public sealed class MilestoneThreeTests
         Assert.Contains("Falha 0xAABBCCDD", html);
         Assert.Contains("Regra de teste sem afirma&#231;&#227;o factual", html);
         Assert.Contains("força do match literal", html);
-        Assert.Contains("Histórico de propostas de reparo", html);
-        Assert.Contains("Proposta de teste", html);
+        Assert.DoesNotContain("Histórico de propostas de reparo", html);
+        Assert.DoesNotContain("Proposta de teste", html);
+        Assert.Single(audit.Records);
         Assert.Contains("autoria autenticada", html);
     }
 
@@ -297,7 +298,7 @@ public sealed class MilestoneThreeTests
         var now = DateTimeOffset.UtcNow;
         var run = new DiagnosticRun(Guid.NewGuid(), now.AddMinutes(-1), now, TimeSpan.FromMinutes(1), new ComputerInventory(),
             CreateReport(Finding("Scanner", "Sistema", "Achado", "Evidência local")));
-        var service = new DiagnosticAssessmentService(new InMemoryKnowledgeRepository([]), new InMemoryRepairAuditLog(),
+        var service = new DiagnosticAssessmentService(new InMemoryKnowledgeRepository([]),
             new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
 
         var html = await service.CreateHtmlReportAsync(run);
@@ -307,7 +308,7 @@ public sealed class MilestoneThreeTests
     }
 
     [Fact]
-    public void HtmlReportEscapesUntrustedTextAndIncludesScoreEvidenceRecommendationsAndActionHistory()
+    public void HtmlReportRedactsAndEscapesUntrustedTextWithoutRepairHistory()
     {
         var malicious = "<script>alert('x')</script>";
         var run = new DiagnosticRun(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow,
@@ -316,15 +317,13 @@ public sealed class MilestoneThreeTests
             MatchConfidence.Low, "Match textual fraco.", "Correspondência", ["causa"], ["solução"],
             [new RecommendationEvidence("Scanner", "Sistema", malicious, malicious, DateTimeOffset.UtcNow, "termo")],
             [new KnowledgeReference("Docs", "https://example.invalid/docs")]);
-        var history = new RepairHistoryRecord(Guid.NewGuid(), "demo", "Demonstração", RepairExecutionStatus.Declined,
-            RepairRiskLevel.Low, false, false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "Nenhuma alteração.");
         var html = new HtmlDiagnosticReportFormatter().Format(run, [recommendation],
-            new RootCauseAnalysis("Causa indeterminada.", []), [history]);
+            new RootCauseAnalysis("Causa indeterminada.", []));
 
         Assert.Contains("Health Score", html);
         Assert.Contains("Evidências diagnósticas", html);
         Assert.Contains("Recomendações", html);
-        Assert.Contains("Histórico de propostas de reparo", html);
+        Assert.DoesNotContain("Histórico de propostas de reparo", html);
         Assert.Contains("&lt;script&gt;", html);
         Assert.DoesNotContain(malicious, html);
         Assert.Contains("https://example.invalid/docs", html);

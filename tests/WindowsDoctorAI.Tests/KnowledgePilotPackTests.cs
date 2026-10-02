@@ -116,7 +116,7 @@ public sealed class KnowledgePilotPackTests
         Assert.Contains("CBS.log", servicingProcedure.DiagnosticAction, StringComparison.Ordinal);
 
         var run = new DiagnosticRun(Guid.NewGuid(), now, now, TimeSpan.Zero, new ComputerInventory(), report);
-        var html = new HtmlDiagnosticReportFormatter().Format(run, recommendations, new RootCauseAnalysis("Causa indeterminada.", []), []);
+        var html = new HtmlDiagnosticReportFormatter().Format(run, recommendations, new RootCauseAnalysis("Causa indeterminada.", []));
         Assert.Contains("Ação corretiva manual (não executada)", html);
         Assert.Contains("elevação necessária: sim", html, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("CBS.log", html);

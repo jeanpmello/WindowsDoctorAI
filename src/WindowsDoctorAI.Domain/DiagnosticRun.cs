@@ -28,10 +28,10 @@ public sealed record DiagnosticRun(
     ComputerInventory Inventory,
     DiagnosticReport? Report = null);
 
-/// <summary>Preferências locais. Histórico é habilitado por padrão e pode ser desligado pelo usuário.</summary>
+/// <summary>Preferências locais. Histórico é opt-in; retenção zero conserva registros sem expurgo por idade.</summary>
 public sealed record UserSettings
 {
-    public bool SaveDiagnosticHistory { get; init; } = true;
+    public bool SaveDiagnosticHistory { get; init; }
 
     /// <summary>Prazo em dias; zero conserva o histórico sem expurgo automático.</summary>
     public int DiagnosticRetentionDays { get; init; }

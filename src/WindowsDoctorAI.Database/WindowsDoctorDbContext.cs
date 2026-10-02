@@ -73,7 +73,7 @@ public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbConte
             entity.ToTable("UserSettings");
             entity.HasKey(settings => settings.Id);
             entity.Property(settings => settings.Id).ValueGeneratedNever();
-            entity.HasData(new UserSettingsEntity { Id = 1, SaveDiagnosticHistory = true, DiagnosticRetentionDays = 0 });
+            entity.HasData(new UserSettingsEntity { Id = 1, SaveDiagnosticHistory = false, DiagnosticRetentionDays = 0 });
         });
         modelBuilder.Entity<KnowledgeRuleEntity>(entity =>
         {

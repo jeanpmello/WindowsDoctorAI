@@ -54,7 +54,8 @@ public sealed class DiagnosticEngineTests
         Assert.Equal(2, report.Results.Count);
         var failure = Assert.Single(report.Results, result => result.ScannerName == "Broken");
         Assert.Equal(DiagnosticStatus.Unavailable, failure.Status);
-        Assert.Contains("InvalidOperationException", failure.Evidence);
+        Assert.Contains("Falha isolada", failure.Evidence);
+        Assert.DoesNotContain(nameof(InvalidOperationException), failure.Evidence);
         Assert.DoesNotContain("internal test detail", failure.Description);
         Assert.Equal(100, report.HealthScore?.Value);
     }

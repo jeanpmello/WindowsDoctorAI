@@ -63,8 +63,8 @@ public sealed class WindowsDiagnosticDataSource(ILogger<WindowsDiagnosticDataSou
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            logger.LogWarning(exception, "A coleta de diagnóstico local {Source} não está disponível.", source);
-            return ProbeResult<T>.Unavailable($"A fonte {source} está indisponível ou sem permissão ({exception.GetType().Name}).");
+            logger.LogWarning("Uma fonte de diagnóstico local está indisponível; detalhes omitidos por privacidade.");
+            return ProbeResult<T>.Unavailable("A fonte local está indisponível ou sem permissão; detalhes omitidos por privacidade.");
         }
     }
 

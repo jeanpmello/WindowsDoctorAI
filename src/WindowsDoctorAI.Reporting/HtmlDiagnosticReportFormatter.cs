@@ -4,20 +4,19 @@ using WindowsDoctorAI.Domain;
 
 namespace WindowsDoctorAI.Reporting;
 
-/// <summary>Gera HTML local com encoding de saída; não carrega scripts, estilos ou imagens remotos.</summary>
+/// <summary>Gera HTML local; minimização de privacidade ocorre antes do encoding e não carrega recursos remotos.</summary>
 public sealed class HtmlDiagnosticReportFormatter
 {
     public string Format(
         DiagnosticRun run,
         IReadOnlyList<DiagnosticRecommendation> recommendations,
         RootCauseAnalysis analysis,
-        IReadOnlyList<RepairHistoryRecord> repairHistory,
         int knowledgeRuleCount = -1)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(recommendations);
         ArgumentNullException.ThrowIfNull(analysis);
-        ArgumentNullException.ThrowIfNull(repairHistory);
+        var sourceInventory = run.Inventory;
         run = DiagnosticPrivacyRedactor.Redact(run);
         var report = run.Report;
         var builder = new StringBuilder(8192);
@@ -40,12 +39,12 @@ public sealed class HtmlDiagnosticReportFormatter
         }
         builder.AppendLine("</section>");
 
-        builder.AppendLine("<section class=\"card\"><h2>Análise de correlações</h2><p>").Append(E(analysis.Summary)).AppendLine("</p>");
+        builder.AppendLine("<section class=\"card\"><h2>Análise de correlações</h2><p>").Append(S(analysis.Summary, sourceInventory)).AppendLine("</p>");
         foreach (var correlation in analysis.Correlations)
         {
-            builder.Append("<article class=\"item\"><strong>").Append(E(correlation.SharedIdentifier)).Append("</strong> <span class=\"pill\">força de associação: ").Append(E(Label(correlation.AssociationStrength))).Append("</span><p>").Append(E(correlation.Explanation)).AppendLine("</p>");
+            builder.Append("<article class=\"item\"><strong>").Append(S(correlation.SharedIdentifier, sourceInventory)).Append("</strong> <span class=\"pill\">força de associação: ").Append(E(Label(correlation.AssociationStrength))).Append("</span><p>").Append(S(correlation.Explanation, sourceInventory)).AppendLine("</p>");
             foreach (var evidence in correlation.Evidence)
-                builder.Append("<p><strong>").Append(E(evidence.Category)).Append(" / ").Append(E(evidence.ScannerName)).Append(":</strong> ").Append(E(evidence.Title)).Append(" · ").Append(E(evidence.Evidence)).AppendLine("</p>");
+                builder.Append("<p><strong>").Append(S(evidence.Category, sourceInventory)).Append(" / ").Append(S(evidence.ScannerName, sourceInventory)).Append(":</strong> ").Append(S(evidence.Title, sourceInventory)).Append(" · ").Append(S(evidence.Evidence, sourceInventory)).AppendLine("</p>");
             builder.AppendLine("</article>");
         }
         builder.AppendLine("</section>");
@@ -57,39 +56,40 @@ public sealed class HtmlDiagnosticReportFormatter
             builder.AppendLine("<p>Nenhuma regra importada correspondeu aos achados desta execução; nenhuma recomendação de conhecimento foi gerada.</p>");
         foreach (var recommendation in recommendations)
         {
-            builder.Append("<article class=\"item\"><h3>").Append(E(recommendation.Title)).Append("</h3><p>").Append(E(recommendation.Domain)).Append(" · impacto informado: ").Append(E(Label(recommendation.Impact))).Append(" · força do match literal: ").Append(E(Label(recommendation.Confidence))).AppendLine("</p>");
+            builder.Append("<article class=\"item\"><h3>").Append(S(recommendation.Title, sourceInventory)).Append("</h3><p>").Append(S(recommendation.Domain, sourceInventory)).Append(" · impacto informado: ").Append(E(Label(recommendation.Impact))).Append(" · força do match literal: ").Append(E(Label(recommendation.Confidence))).AppendLine("</p>");
             builder.AppendLine("<p class=\"muted\">A força do match literal não é probabilidade de causa ou de sucesso; impacto e referências são declarações do pacote, não verificadas pelo aplicativo.</p>");
-            builder.Append("<p>").Append(E(recommendation.Explanation)).Append(" ").Append(E(recommendation.ConfidenceExplanation)).AppendLine("</p>");
+            builder.Append("<p>").Append(S(recommendation.Explanation, sourceInventory)).Append(" ").Append(S(recommendation.ConfidenceExplanation, sourceInventory)).AppendLine("</p>");
             if (!string.IsNullOrWhiteSpace(recommendation.Applicability))
-                builder.Append("<p><strong>Aplicabilidade declarada:</strong> ").Append(E(recommendation.Applicability)).AppendLine("</p>");
-            AppendList(builder, "Causas descritas pela regra", recommendation.Causes);
-            AppendList(builder, "Soluções descritas pela regra (não executadas)", recommendation.Solutions);
+                builder.Append("<p><strong>Aplicabilidade declarada:</strong> ").Append(S(recommendation.Applicability, sourceInventory)).AppendLine("</p>");
+            AppendList(builder, "Causas descritas pela regra", recommendation.Causes, sourceInventory);
+            AppendList(builder, "Soluções descritas pela regra (não executadas)", recommendation.Solutions, sourceInventory);
             if (recommendation.RequiredEvidence is { Count: > 0 })
-                AppendList(builder, "Evidência necessária para aplicar a regra", recommendation.RequiredEvidence);
+                AppendList(builder, "Evidência necessária para aplicar a regra", recommendation.RequiredEvidence, sourceInventory);
             if (recommendation.Procedure is { } procedure)
             {
-                builder.Append("<p><strong>Ação diagnóstica descrita (não executada):</strong> ").Append(E(procedure.DiagnosticAction)).AppendLine("</p>");
-                builder.Append("<p><strong>Ação corretiva manual (não executada):</strong> ").Append(E(procedure.CorrectiveAction)).AppendLine("</p>");
-                builder.Append("<p><strong>Privilégio:</strong> ").Append(E(procedure.RequiredPrivilege))
+                builder.Append("<p><strong>Ação diagnóstica descrita (não executada):</strong> ").Append(S(procedure.DiagnosticAction, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Ação corretiva manual (não executada):</strong> ").Append(S(procedure.CorrectiveAction, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Privilégio:</strong> ").Append(S(procedure.RequiredPrivilege, sourceInventory))
                     .Append(" · elevação necessária: ").Append(procedure.RequiresElevation ? "sim" : "não")
                     .Append(" · ação modificadora: ").Append(procedure.IsModifying ? "sim" : "não")
                     .Append(" · confirmação explícita: ").Append(procedure.RequiresUserConfirmation ? "sim" : "não")
                     .Append(" · somente manual: ").Append(procedure.ManualOnly ? "sim" : "não").AppendLine("</p>");
-                builder.Append("<p><strong>Risco declarado:</strong> ").Append(E(procedure.Risk)).AppendLine("</p>");
-                builder.Append("<p><strong>Backup:</strong> ").Append(E(procedure.Backup)).AppendLine("</p>");
-                builder.Append("<p><strong>Rollback:</strong> ").Append(E(procedure.Rollback)).AppendLine("</p>");
-                builder.Append("<p><strong>Limitação da fonte:</strong> ").Append(E(procedure.SourceLimitation)).AppendLine("</p>");
+                builder.Append("<p><strong>Risco declarado:</strong> ").Append(S(procedure.Risk, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Backup:</strong> ").Append(S(procedure.Backup, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Rollback:</strong> ").Append(S(procedure.Rollback, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Limitação da fonte:</strong> ").Append(S(procedure.SourceLimitation, sourceInventory)).AppendLine("</p>");
             }
             builder.AppendLine("<p><strong>Evidências correspondentes</strong></p>");
             foreach (var evidence in recommendation.Evidence)
-                builder.Append("<p>").Append(E(evidence.Category)).Append(" / ").Append(E(evidence.ScannerName)).Append(" · ").Append(E(evidence.Title)).Append(" · indicador <code>").Append(E(evidence.MatchedIndicator)).Append("</code> · ").Append(E(evidence.Evidence)).AppendLine("</p>");
+                builder.Append("<p>").Append(S(evidence.Category, sourceInventory)).Append(" / ").Append(S(evidence.ScannerName, sourceInventory)).Append(" · ").Append(S(evidence.Title, sourceInventory)).Append(" · indicador <code>").Append(S(evidence.MatchedIndicator, sourceInventory)).Append("</code> · ").Append(S(evidence.Evidence, sourceInventory)).AppendLine("</p>");
             builder.AppendLine("<p><strong>Referências declaradas (não verificadas pelo aplicativo)</strong></p><ul>");
             foreach (var reference in recommendation.References)
             {
                 builder.Append("<li>");
-                if (Uri.TryCreate(reference.Url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
-                    builder.Append("<a rel=\"noreferrer noopener\" href=\"").Append(E(uri.AbsoluteUri)).Append("\">").Append(E(reference.Title)).Append("</a>");
-                else builder.Append(E(reference.Title));
+                var safeUrl = DiagnosticPrivacyRedactor.RedactText(reference.Url, sourceInventory);
+                if (Uri.TryCreate(safeUrl, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                    builder.Append("<a rel=\"noreferrer noopener\" href=\"").Append(E(uri.AbsoluteUri)).Append("\">").Append(S(reference.Title, sourceInventory)).Append("</a>");
+                else builder.Append(S(reference.Title, sourceInventory));
                 builder.AppendLine("</li>");
             }
             builder.AppendLine("</ul></article>");
@@ -101,29 +101,31 @@ public sealed class HtmlDiagnosticReportFormatter
         else foreach (var result in report.Results)
         {
             var css = result.Severity == DiagnosticSeverity.Critical ? "critical" : result.Severity == DiagnosticSeverity.Warning ? "warning" : string.Empty;
-            builder.Append("<article class=\"item ").Append(css).Append("\"><h3>").Append(E(result.Title)).Append("</h3><p>").Append(E(result.Category)).Append(" / ").Append(E(result.ScannerName)).Append(" · ").Append(E(Label(result.Status))).Append(" · ").Append(E(Label(result.Severity))).AppendLine("</p>");
-            builder.Append("<p>").Append(E(result.Description)).AppendLine("</p><p><strong>Evidência:</strong> ");
-            builder.Append(E(result.Evidence)).AppendLine("</p><p class=\"muted\">Recomendação do scanner: ");
-            builder.Append(E(result.Recommendation)).Append(" · ").Append(E(result.Timestamp.ToString("u"))).AppendLine("</p></article>");
+            builder.Append("<article class=\"item ").Append(css).Append("\"><h3>").Append(S(result.Title, sourceInventory)).Append("</h3><p>").Append(S(result.Category, sourceInventory)).Append(" / ").Append(S(result.ScannerName, sourceInventory)).Append(" · ").Append(E(Label(result.Status))).Append(" · ").Append(E(Label(result.Severity))).AppendLine("</p>");
+            builder.Append("<p>").Append(S(result.Description, sourceInventory)).AppendLine("</p><p><strong>Evidência:</strong> ");
+            builder.Append(S(result.Evidence, sourceInventory)).AppendLine("</p><p class=\"muted\">Recomendação do scanner: ");
+            builder.Append(S(result.Recommendation, sourceInventory)).Append(" · ").Append(E(result.Timestamp.ToString("u"))).AppendLine("</p></article>");
         }
         builder.AppendLine("</section>");
-
-        builder.AppendLine("<section class=\"card\"><h2>Histórico de propostas de reparo</h2>");
-        if (repairHistory.Count == 0) builder.AppendLine("<p>Nenhuma proposta de reparo foi registrada.</p>");
-        else foreach (var item in repairHistory)
-            builder.Append("<article class=\"item\"><strong>").Append(E(item.Title)).Append("</strong> · ").Append(E(Label(item.Status))).Append(" · risco informado: ").Append(E(Label(item.Risk))).Append(" · confirmação: ").Append(item.UserConfirmed ? "sim" : "não").Append(" · rollback anunciado: ").Append(item.RollbackSupported ? "sim" : "não").Append("<p>").Append(E(item.Details)).Append("</p><p class=\"muted\">").Append(E(item.CompletedAtUtc.ToString("u"))).AppendLine("</p></article>");
-        builder.AppendLine("</section><footer>Relatório gerado localmente. Pacotes e fontes declaradas não têm autoria autenticada pelo aplicativo; regras, referências, causas, soluções e impacto são dados declarados. A força de match descreve correspondência textual, não probabilidade de causa ou sucesso. Correlações não determinam causa. Nenhum reparo é executado por este relatório.</footer></body></html>");
+        builder.AppendLine("<footer>Relatório gerado localmente. Pacotes e fontes declaradas não têm autoria autenticada pelo aplicativo; regras, referências, causas, soluções e impacto são dados declarados. A força de match descreve correspondência textual, não probabilidade de causa ou sucesso. Correlações não determinam causa. Nenhum reparo é executado por este relatório. O histórico de reparos permanece no SQLite e não é agregado a este relatório.</footer></body></html>");
         return builder.ToString();
     }
 
-    private static void AppendList(StringBuilder builder, string title, IReadOnlyList<string> values)
+    private static void AppendList(StringBuilder builder, string title, IReadOnlyList<string> values, ComputerInventory sourceInventory)
     {
         if (values.Count == 0) return;
         builder.Append("<p><strong>").Append(E(title)).AppendLine("</strong></p><ul>");
-        foreach (var value in values) builder.Append("<li>").Append(E(value)).AppendLine("</li>");
+        foreach (var value in values) builder.Append("<li>").Append(S(value, sourceInventory)).AppendLine("</li>");
         builder.AppendLine("</ul>");
     }
 
-    private static string E(string value) => WebUtility.HtmlEncode(value ?? string.Empty);
-    private static string Label(Enum value) => E(value.ToString());
+    private static string S(string value, ComputerInventory sourceInventory)
+    {
+        var redacted = DiagnosticPrivacyRedactor.RedactText(value, sourceInventory);
+        return E(redacted);
+    }
+
+    /// <summary>HTML encoding é uma etapa distinta da redação de privacidade.</summary>
+    private static string E(string? value) => WebUtility.HtmlEncode(value ?? string.Empty);
+    private static string Label(Enum value) => value.ToString();
 }

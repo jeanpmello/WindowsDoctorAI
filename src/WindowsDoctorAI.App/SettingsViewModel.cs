@@ -11,17 +11,18 @@ public sealed record DiagnosticRetentionOption(int Days, string Label);
 
 public partial class SettingsViewModel(
     IUserSettingsRepository settingsRepository,
+    DiagnosticPreferencesService preferencesService,
     DiagnosticHistoryMaintenanceService historyMaintenance,
     ILogger<SettingsViewModel> logger) : ObservableObject
 {
-    [ObservableProperty] private bool _saveDiagnosticHistory = true;
+    [ObservableProperty] private bool _saveDiagnosticHistory;
     [ObservableProperty] private int _diagnosticRetentionDays;
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private string _statusMessage = "As preferências são mantidas localmente neste computador.";
 
     public IReadOnlyList<DiagnosticRetentionOption> RetentionOptions { get; } =
     [
-        new(0, "Nunca (conservar sem expurgo automático)"),
+        new(0, "Nunca (conservar sem expurgo por idade)"),
         new(30, "30 dias"),
         new(90, "90 dias"),
         new(180, "180 dias"),
@@ -38,17 +39,17 @@ public partial class SettingsViewModel(
             SaveDiagnosticHistory = settings.SaveDiagnosticHistory;
             DiagnosticRetentionDays = settings.DiagnosticRetentionDays;
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            logger.LogWarning(exception, "As preferências locais não puderam ser carregadas.");
+            logger.LogWarning("As preferências locais não puderam ser carregadas; detalhes omitidos por privacidade.");
             StatusMessage = "Não foi possível carregar as preferências salvas.";
         }
         finally { IsBusy = false; }
     }
 
-    [RelayCommand]
-    private async Task SaveAsync()
+    public async Task SaveAsync(bool confirmAgeBasedPurge)
     {
+        if (IsBusy) return;
         IsBusy = true;
         try
         {
@@ -63,24 +64,17 @@ public partial class SettingsViewModel(
                 SaveDiagnosticHistory = SaveDiagnosticHistory,
                 DiagnosticRetentionDays = DiagnosticRetentionDays
             };
-            await settingsRepository.SaveAsync(settings);
-            try
-            {
-                var purged = await historyMaintenance.PurgeExpiredAsync(settings, DateTimeOffset.UtcNow);
-                StatusMessage = purged == 0
+            var result = await preferencesService.SaveAsync(settings, confirmAgeBasedPurge, DateTimeOffset.UtcNow);
+            StatusMessage = result.WasCanceled
+                ? "Operação cancelada; preferências e histórico não foram alterados."
+                : result.PurgedRecords == 0
                     ? "Configurações salvas localmente. Nenhum registro expirado precisou ser removido."
-                    : $"Configurações salvas; {purged} execução(ões) expirada(s) foram removidas do histórico SQLite.";
-            }
-            catch (Exception exception)
-            {
-                logger.LogWarning(exception, "As configurações foram salvas, mas o expurgo de retenção falhou.");
-                StatusMessage = "Configurações salvas, mas não foi possível aplicar a retenção. O histórico permanece no banco.";
-            }
+                    : $"Configurações salvas; {result.PurgedRecords} execução(ões) expirada(s) foram removidas do histórico SQLite.";
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            logger.LogError(exception, "As preferências locais não puderam ser salvas.");
-            StatusMessage = "Não foi possível salvar as configurações no banco local.";
+            logger.LogError("As preferências não puderam ser salvas/aplicadas; detalhes omitidos por privacidade.");
+            StatusMessage = "Não foi possível salvar ou aplicar as configurações no banco local.";
         }
         finally { IsBusy = false; }
     }
@@ -99,9 +93,9 @@ public partial class SettingsViewModel(
                     ? "Não havia execuções no histórico SQLite para remover."
                     : $"Histórico de diagnósticos apagado: {result.DeletedRecords} execução(ões) removida(s).";
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            logger.LogError(exception, "Não foi possível apagar o histórico diagnóstico local.");
+            logger.LogError("Não foi possível apagar o histórico; detalhes omitidos por privacidade.");
             StatusMessage = "Não foi possível apagar o histórico. Nenhum outro arquivo ou dado foi alterado.";
         }
         finally { IsBusy = false; }

@@ -95,10 +95,10 @@ public partial class HomeViewModel(
             PackageReviewStatus = "Pacote válido para revisão. A fonte/autoria não foi verificada; revise os metadados antes de importar.";
             StatusMessage = "Pacote validado sem gravação. A importação só ocorre quando você selecionar Importar.";
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            ShowPackagePreviewError(exception.Message);
-            logger.LogWarning(exception, "O pacote local de conhecimento foi recusado na prévia.");
+            ShowPackagePreviewError("O pacote local foi recusado na validação.");
+            logger.LogWarning("O pacote local de conhecimento foi recusado na prévia; detalhes omitidos por privacidade.");
         }
 
         UpdateImportCommandState();
@@ -129,12 +129,12 @@ public partial class HomeViewModel(
             PackageReviewStatus = $"Importação concluída: {imported.ImportedRules} regra(s), versão {imported.Version}. Pacote e fonte continuam não verificados quanto à autoria.";
             StatusMessage = "Pacote importado localmente; a importação não autentica a autoria nem comprova as afirmações das regras.";
         }
-        catch (Exception exception)
+        catch (Exception)
         {
             _pendingPackageJson = null;
-            PackageReviewStatus = $"Importação recusada sem gravação parcial: {exception.Message}";
+            PackageReviewStatus = "Importação recusada sem gravação parcial; detalhes internos foram omitidos por privacidade.";
             StatusMessage = "O pacote foi recusado. Nenhuma importação parcial foi mantida.";
-            logger.LogWarning(exception, "O pacote local de conhecimento foi recusado durante a importação.");
+            logger.LogWarning("O pacote local de conhecimento foi recusado durante a importação; detalhes omitidos por privacidade.");
         }
         finally
         {
@@ -152,9 +152,9 @@ public partial class HomeViewModel(
                 ? "Base de conhecimento vazia: nenhum pacote importado; não haverá recomendações baseadas em regras."
                 : $"{rules.Count} regra(s) disponíveis localmente. Pacotes e fontes declaradas não são autenticados pelo aplicativo.";
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            logger.LogWarning(exception, "Não foi possível consultar a base de conhecimento local.");
+            logger.LogWarning("Não foi possível consultar a base de conhecimento local; detalhes omitidos por privacidade.");
             KnowledgeBaseStatus = "Não foi possível verificar o estado da base de conhecimento local.";
         }
     }
@@ -173,19 +173,19 @@ public partial class HomeViewModel(
             StatusMessage = "Relatório HTML preparado localmente. Escolha onde salvar o arquivo.";
             return html;
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            logger.LogError(exception, "Não foi possível gerar o relatório HTML local.");
+            logger.LogError("Não foi possível gerar o relatório HTML local; detalhes omitidos por privacidade.");
             StatusMessage = "Não foi possível gerar o relatório HTML local.";
             return null;
         }
     }
 
     public void ReportHtmlSaved(string path) =>
-        StatusMessage = $"Relatório HTML salvo localmente como {Path.GetFileName(path)}. Verifique evidências sensíveis antes de compartilhá-lo.";
+        StatusMessage = "Relatório HTML salvo localmente no destino escolhido. Verifique evidências antes de compartilhá-lo.";
 
     public void ReportHtmlSaveFailed(string message) =>
-        StatusMessage = $"Não foi possível salvar o relatório HTML: {message}";
+        StatusMessage = "Não foi possível salvar o relatório HTML no destino escolhido.";
 
     [RelayCommand(CanExecute = nameof(CanStartDiagnostic))]
     private async Task StartDiagnosticAsync()
@@ -198,7 +198,7 @@ public partial class HomeViewModel(
             _currentRun = outcome.Run;
             CanExportHtmlReport = true;
             DisplayInventory(outcome.Run.Inventory);
-            DisplayReport(outcome.Run.Report, outcome.Run.Duration);
+            DisplayReport(outcome.Run.Report, outcome.Run.Duration, outcome.Run.Inventory);
             LastDiagnosticText = $"Concluído às {outcome.Run.CompletedAtUtc.ToLocalTime():G}";
             StatusMessage = outcome.PersistenceWarning ?? (outcome.HistorySaved
                 ? "Diagnóstico concluído e salvo no histórico local."
@@ -206,8 +206,8 @@ public partial class HomeViewModel(
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "A execução do diagnóstico falhou.");
-            StatusMessage = $"Não foi possível concluir o diagnóstico: {exception.Message}";
+            logger.LogError("A execução do diagnóstico falhou; detalhes omitidos por privacidade.");
+            StatusMessage = DiagnosticPrivacyMessages.DiagnosticFailure(exception);
         }
         finally
         {
@@ -225,7 +225,7 @@ public partial class HomeViewModel(
             _currentRun = latest;
             CanExportHtmlReport = true;
             DisplayInventory(latest.Inventory);
-            DisplayReport(latest.Report, latest.Duration);
+            DisplayReport(latest.Report, latest.Duration, latest.Inventory);
             LastDiagnosticText = $"Concluído às {latest.CompletedAtUtc.ToLocalTime():G}";
             StatusMessage = latest.Report is null
                 ? "Inventário legado do Milestone 1 carregado. Este registro não contém resultados do Diagnostic Engine; score não calculado."
@@ -233,14 +233,15 @@ public partial class HomeViewModel(
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "O último diagnóstico não pôde ser carregado do histórico local.");
-            StatusMessage = "Não foi possível carregar o histórico local. Você ainda pode iniciar um novo diagnóstico.";
+            logger.LogWarning("O último diagnóstico não pôde ser carregado do histórico local; detalhes omitidos por privacidade.");
+            StatusMessage = DiagnosticPrivacyMessages.HistoryLoadFailure(exception);
         }
     }
 
-    private void DisplayReport(DiagnosticReport? report, TimeSpan overallDuration)
+    private void DisplayReport(DiagnosticReport? report, TimeSpan overallDuration, ComputerInventory? inventory = null)
     {
         DiagnosticDurationText = FormatDuration(overallDuration);
+        report = DiagnosticPrivacyRedactor.RedactReport(report, inventory);
         if (report is null)
         {
             HealthScore = "Não calculado";
@@ -259,7 +260,7 @@ public partial class HomeViewModel(
         CriticalProblemsText = report.CriticalProblems.ToString(CultureInfo.InvariantCulture);
         WarningsText = report.Warnings.ToString(CultureInfo.InvariantCulture);
         CategoriesSummary = FormatCategories(report);
-        FindingsSummary = FormatFindings(report);
+        FindingsSummary = DiagnosticDisplayFormatter.FormatFindings(report, inventory);
     }
 
     private static string FormatCategories(DiagnosticReport report)
@@ -273,26 +274,6 @@ public partial class HomeViewModel(
         lines.AddRange(report.Categories.Where(summary => !DashboardCategories.Contains(summary.Category, StringComparer.OrdinalIgnoreCase))
             .Select(summary => $"{summary.Category}: {summary.VerifiedChecks} verificada(s), {summary.Findings} achado(s), {summary.UnavailableChecks + summary.NotVerifiedChecks} sem confirmação"));
         return string.Join(Environment.NewLine, lines);
-    }
-
-    private static string FormatFindings(DiagnosticReport report)
-    {
-        var findings = report.Results.Where(result => result.Status == DiagnosticStatus.Finding)
-            .OrderByDescending(result => result.Severity)
-            .ThenByDescending(result => result.Timestamp)
-            .ToArray();
-        if (findings.Length == 0)
-        {
-            return report.VerifiedChecks == 0
-                ? "Nenhum achado confirmado; as verificações ficaram indisponíveis ou não verificadas, então não há score."
-                : "Nenhum problema crítico ou aviso foi encontrado nas verificações confirmadas.";
-        }
-
-        const int displayLimit = 10;
-        var lines = findings.Take(displayLimit).Select(result =>
-            $"[{SeverityText(result.Severity)}] {result.ScannerName} — {result.Title}\n{result.Description}\nRecomendação: {result.Recommendation}\nEvidência: {result.Evidence}");
-        var remainder = findings.Length > displayLimit ? $"{Environment.NewLine}Exibindo {displayLimit} de {findings.Length} achados. O relatório contém a lista completa." : string.Empty;
-        return string.Join(Environment.NewLine + Environment.NewLine, lines) + remainder;
     }
 
     private void DisplayInventory(ComputerInventory inventory)
@@ -335,13 +316,6 @@ public partial class HomeViewModel(
         NetworkAdapters = inventory.NetworkAdapters.Count == 0 ? "Indisponível" : string.Join(Environment.NewLine,
             inventory.NetworkAdapters.Select(adapter => $"{adapter.Name} · {adapter.Description} · {adapter.Status}"));
     }
-
-    private static string SeverityText(DiagnosticSeverity severity) => severity switch
-    {
-        DiagnosticSeverity.Critical => "Crítico",
-        DiagnosticSeverity.Warning => "Aviso",
-        _ => "Informativo"
-    };
 
     private static string Text<T>(T? value) => value?.ToString() is { Length: > 0 } text ? text : "Indisponível";
     private static string BoolText(bool? value) => value switch { true => "Ativado", false => "Desativado", _ => "Indisponível" };

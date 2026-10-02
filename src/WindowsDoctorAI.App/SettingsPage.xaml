@@ -12,17 +12,17 @@
                     BorderThickness="1" CornerRadius="12" Padding="20" Margin="0,8,0,0">
                 <StackPanel Spacing="12">
                     <TextBlock Text="Diagnósticos" FontSize="18" FontWeight="SemiBold" />
-                    <CheckBox Content="Salvar diagnósticos no histórico local (SQLite)"
+                    <CheckBox Content="Salvar diagnósticos no histórico local (SQLite) — desativado por padrão"
                               IsChecked="{Binding SaveDiagnosticHistory, Mode=TwoWay}" />
-                    <TextBlock Text="Desativar esta opção impede novas gravações; diagnósticos já salvos não são removidos." TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="Remover automaticamente registros após" FontWeight="SemiBold" Margin="0,8,0,0" />
+                    <TextBlock Text="Marque e salve para autorizar novas gravações locais. Desativar impede novas gravações, mas não remove registros existentes." TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="Prazo para expurgo por idade" FontWeight="SemiBold" Margin="0,8,0,0" />
                     <ComboBox ItemsSource="{Binding RetentionOptions}"
                               DisplayMemberPath="Label"
                               SelectedValuePath="Days"
                               SelectedValue="{Binding DiagnosticRetentionDays, Mode=TwoWay}"
                               HorizontalAlignment="Left" MinWidth="260" />
-                    <TextBlock Text="A retenção usa a data UTC de conclusão e remove somente execuções SQLite ao iniciar o app e ao salvar esta opção. O padrão conserva tudo; arquivos HTML exportados, reparos e pacotes não são apagados." TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <Button Content="Salvar configurações" Command="{Binding SaveCommand}" HorizontalAlignment="Left" Style="{StaticResource AccentButtonStyle}" />
+                    <TextBlock Text="O padrão conserva os registros. Salvar um prazo diferente de zero sempre pede confirmação e pode remover execuções SQLite anteriores ao limite; o expurgo não roda ao iniciar o aplicativo. Cancelar preserva preferências e dados. A retenção não remove arquivos HTML já exportados, histórico de reparos ou pacotes." TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button Content="Salvar configurações…" Click="SaveSettings_Click" HorizontalAlignment="Left" Style="{StaticResource AccentButtonStyle}" />
                     <Button Content="Apagar todo o histórico de diagnósticos…" Click="ClearDiagnosticHistory_Click" HorizontalAlignment="Left" />
                     <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" />
                 </StackPanel>

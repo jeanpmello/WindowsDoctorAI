@@ -30,7 +30,7 @@ public sealed class RunComputerInventoryDiagnosticUseCase(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Não foi possível carregar preferências; a execução será exibida sem ser salva.");
+            logger.LogWarning("Não foi possível carregar preferências; detalhes omitidos por privacidade e execução não será salva.");
             return new DiagnosticOutcome(run, false, "Preferências indisponíveis; o resultado não foi salvo no histórico.");
         }
 
@@ -46,7 +46,7 @@ public sealed class RunComputerInventoryDiagnosticUseCase(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "O diagnóstico terminou, mas não foi possível gravá-lo no histórico local.");
+            logger.LogWarning("O diagnóstico terminou, mas não foi possível gravá-lo no histórico local; detalhes omitidos por privacidade.");
             return new DiagnosticOutcome(run, false, "O diagnóstico foi concluído, mas não foi possível salvá-lo no histórico local.");
         }
     }

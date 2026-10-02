@@ -68,7 +68,7 @@ public sealed class RunComputerInventoryDiagnosticUseCaseTests
     {
         var inventory = new ComputerInventory { ComputerName = "TEST-PC" };
         var history = new FakeHistory();
-        var useCase = CreateUseCase(inventory, new UserSettings(), history);
+        var useCase = CreateUseCase(inventory, new UserSettings { SaveDiagnosticHistory = true }, history);
 
         var outcome = await useCase.ExecuteAsync();
 
@@ -93,10 +93,23 @@ public sealed class RunComputerInventoryDiagnosticUseCaseTests
     }
 
     [Fact]
+    public async Task ExecuteDoesNotWriteHistoryWithDefaultPreferences()
+    {
+        var history = new FakeHistory();
+        var useCase = CreateUseCase(new ComputerInventory(), new UserSettings(), history);
+
+        var outcome = await useCase.ExecuteAsync();
+
+        Assert.False(outcome.HistorySaved);
+        Assert.Null(outcome.PersistenceWarning);
+        Assert.Null(history.SavedRun);
+    }
+
+    [Fact]
     public async Task ExecutePreservesCollectedResultWhenHistoryWriteFails()
     {
         var history = new FakeHistory { ThrowOnSave = true };
-        var useCase = CreateUseCase(new ComputerInventory { ComputerName = "SURVIVES" }, new UserSettings(), history);
+        var useCase = CreateUseCase(new ComputerInventory { ComputerName = "SURVIVES" }, new UserSettings { SaveDiagnosticHistory = true }, history);
 
         var outcome = await useCase.ExecuteAsync();
 
@@ -171,7 +184,7 @@ public sealed class SqliteRepositoryTests
         var history = new SqliteDiagnosticRunRepository(context);
         var settings = new SqliteUserSettingsRepository(context);
 
-        Assert.True((await settings.GetAsync()).SaveDiagnosticHistory);
+        Assert.False((await settings.GetAsync()).SaveDiagnosticHistory);
         Assert.Equal(0, (await settings.GetAsync()).DiagnosticRetentionDays);
         await settings.SaveAsync(new UserSettings { SaveDiagnosticHistory = false, DiagnosticRetentionDays = 90 });
         var savedSettings = await settings.GetAsync();

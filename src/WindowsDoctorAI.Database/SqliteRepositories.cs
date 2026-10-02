@@ -322,7 +322,7 @@ public static class DatabaseServiceCollectionExtensions
 /// <summary>Schema local evolui em passos idempotentes; PRAGMA user_version identifica o último passo concluído.</summary>
 public static class WindowsDoctorDatabaseMigrator
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     public static async Task MigrateAsync(WindowsDoctorDbContext context, CancellationToken cancellationToken = default)
     {
@@ -350,7 +350,7 @@ public static class WindowsDoctorDatabaseMigrator
                 CREATE TABLE IF NOT EXISTS "UserSettings" (
                     "Id" INTEGER NOT NULL CONSTRAINT "PK_UserSettings" PRIMARY KEY,
                     "SaveDiagnosticHistory" INTEGER NOT NULL);
-                INSERT OR IGNORE INTO "UserSettings" ("Id", "SaveDiagnosticHistory") VALUES (1, 1);
+                INSERT OR IGNORE INTO "UserSettings" ("Id", "SaveDiagnosticHistory") VALUES (1, 0);
                 CREATE TABLE IF NOT EXISTS "KnowledgeBaseVersions" (
                     "Version" TEXT NOT NULL CONSTRAINT "PK_KnowledgeBaseVersions" PRIMARY KEY,
                     "Source" TEXT NOT NULL,
@@ -385,6 +385,11 @@ public static class WindowsDoctorDatabaseMigrator
                     ALTER TABLE "UserSettings" ADD COLUMN "DiagnosticRetentionDays" INTEGER NOT NULL DEFAULT 0;
                     """, cancellationToken).ConfigureAwait(false);
             }
+
+            // O default anterior era true sem consentimento afirmativo separado; preserva os registros, mas exige opt-in novo.
+            await context.Database.ExecuteSqlRawAsync("""
+                UPDATE "UserSettings" SET "SaveDiagnosticHistory" = 0;
+                """, cancellationToken).ConfigureAwait(false);
 
             await context.Database.ExecuteSqlRawAsync($"PRAGMA user_version = {CurrentVersion};", cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);

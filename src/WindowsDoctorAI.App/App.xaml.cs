@@ -47,6 +47,7 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();
                     services.AddTransient<RunComputerInventoryDiagnosticUseCase>();
                     services.AddTransient<DiagnosticHistoryMaintenanceService>();
+                    services.AddTransient<DiagnosticPreferencesService>();
                     services.AddSingleton<RecommendationEngine>();
                     services.AddSingleton<RootCauseAnalyzer>();
                     services.AddSingleton<HtmlDiagnosticReportFormatter>();
@@ -68,25 +69,19 @@ public partial class App : global::Microsoft.UI.Xaml.Application
             try
             {
                 await _host.Services.InitializeWindowsDoctorDatabaseAsync();
-                await using var scope = _host.Services.CreateAsyncScope();
-                var settings = await scope.ServiceProvider.GetRequiredService<IUserSettingsRepository>().GetAsync();
-                var purged = await scope.ServiceProvider.GetRequiredService<DiagnosticHistoryMaintenanceService>()
-                    .PurgeExpiredAsync(settings, DateTimeOffset.UtcNow);
-                if (purged > 0)
-                    _host.Services.GetRequiredService<ILogger<App>>().LogInformation("A retenção local removeu {Count} execução(ões) diagnóstica(s) expirada(s).", purged);
             }
-            catch (Exception exception)
+            catch (Exception)
             {
-                _host.Services.GetRequiredService<ILogger<App>>().LogError(exception, "Não foi possível inicializar o banco SQLite local.");
+                _host.Services.GetRequiredService<ILogger<App>>().LogError("Não foi possível inicializar o banco SQLite local; detalhes omitidos por privacidade.");
             }
 
             _mainWindow = _host.Services.GetRequiredService<MainWindow>();
             _mainWindow.Closed += MainWindow_Closed;
             _mainWindow.Activate();
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            _host?.Services.GetService<ILogger<App>>()?.LogCritical(exception, "A inicialização do Windows Doctor AI falhou.");
+            _host?.Services.GetService<ILogger<App>>()?.LogCritical("A inicialização do Windows Doctor AI falhou; detalhes omitidos por privacidade.");
             throw;
         }
     }

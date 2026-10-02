@@ -134,7 +134,7 @@ public sealed class WindowsManagementInventoryDataSource(ILogger<WindowsManageme
         }
         catch (Exception exception) when (exception is ManagementException or UnauthorizedAccessException or COMException or InvalidOperationException)
         {
-            logger.LogWarning(exception, "A consulta local WMI {WmiQuery} não pôde ser concluída.", query);
+            logger.LogWarning("Uma consulta local WMI não pôde ser concluída; detalhes omitidos por privacidade.");
             return null;
         }
     }
@@ -159,9 +159,9 @@ public sealed class WindowsManagementInventoryDataSource(ILogger<WindowsManageme
                 all.SelectMany(adapter => adapter.IPv4Addresses).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 all.SelectMany(adapter => adapter.IPv6Addresses).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
         }
-        catch (NetworkInformationException exception)
+        catch (NetworkInformationException)
         {
-            logger.LogWarning(exception, "Não foi possível enumerar os adaptadores de rede locais.");
+            logger.LogWarning("Não foi possível enumerar os adaptadores de rede locais; detalhes omitidos por privacidade.");
             return (Array.Empty<NetworkAdapterDetails>(), Array.Empty<string>(), Array.Empty<string>());
         }
     }
