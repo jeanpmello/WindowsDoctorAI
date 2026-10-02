@@ -14,6 +14,24 @@ public interface IComputerInventoryDataSource
     Task<ComputerInventory> CollectAsync(CancellationToken cancellationToken = default);
 }
 
+/// <summary>Plugin de diagnóstico independente; implementações são registradas no contêiner de dependências.</summary>
+public interface IDiagnosticScanner
+{
+    string Name { get; }
+    string Category { get; }
+
+    /// <summary>Indica se esta implementação pode executar simultaneamente com outros scanners.</summary>
+    bool SupportsParallelExecution => true;
+
+    Task<IReadOnlyList<DiagnosticResult>> ScanAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>Porta para executar e consolidar todos os scanners registrados.</summary>
+public interface IDiagnosticEngine
+{
+    Task<DiagnosticReport> RunAsync(CancellationToken cancellationToken = default);
+}
+
 public interface IDiagnosticRunRepository
 {
     Task SaveAsync(DiagnosticRun run, CancellationToken cancellationToken = default);

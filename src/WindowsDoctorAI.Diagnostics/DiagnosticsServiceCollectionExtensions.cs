@@ -18,6 +18,22 @@ public static class DiagnosticsServiceCollectionExtensions
         {
             services.AddSingleton<IComputerInventoryDataSource, UnsupportedInventoryDataSource>();
         }
+
+        services.AddWindowsDiagnosticPlugins();
+        return services;
+    }
+
+    /// <summary>Registra cada scanner como plugin. Plugins futuros podem expor registro equivalente em seu próprio assembly.</summary>
+    public static IServiceCollection AddWindowsDiagnosticPlugins(this IServiceCollection services)
+    {
+        services.AddSingleton<IWindowsDiagnosticDataSource>(provider => OperatingSystem.IsWindows()
+            ? ActivatorUtilities.CreateInstance<WindowsDiagnosticDataSource>(provider)
+            : new UnsupportedWindowsDiagnosticDataSource());
+        services.AddSingleton<IDiagnosticScanner, WindowsUpdateDiagnosticScanner>();
+        services.AddSingleton<IDiagnosticScanner, ServicesDiagnosticScanner>();
+        services.AddSingleton<IDiagnosticScanner, DriversDiagnosticScanner>();
+        services.AddSingleton<IDiagnosticScanner, DiskDiagnosticScanner>();
+        services.AddSingleton<IDiagnosticScanner, EventViewerDiagnosticScanner>();
         return services;
     }
 

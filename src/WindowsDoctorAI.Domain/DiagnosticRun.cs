@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace WindowsDoctorAI.Domain;
 
-/// <summary>Score limitado a 0–100. O valor inicial do milestone é apenas demonstrativo.</summary>
+/// <summary>Score limitado a 0–100, calculado somente a partir de verificações observadas.</summary>
 public readonly record struct HealthScore
 {
     public int Value { get; }
@@ -17,18 +17,16 @@ public readonly record struct HealthScore
 
         Value = value;
     }
-
-    public static HealthScore InitialMilestoneScore => new(95);
 }
 
-/// <summary>Resultado imutável de uma execução local do scanner.</summary>
+/// <summary>Uma execução preserva o inventário do Milestone 1 e pode conter um relatório de scanners.</summary>
 public sealed record DiagnosticRun(
     Guid Id,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset CompletedAtUtc,
     TimeSpan Duration,
     ComputerInventory Inventory,
-    HealthScore HealthScore);
+    DiagnosticReport? Report = null);
 
 /// <summary>Preferências locais. Histórico é habilitado por padrão e pode ser desligado pelo usuário.</summary>
 public sealed record UserSettings

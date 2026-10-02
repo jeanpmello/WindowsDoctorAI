@@ -64,7 +64,7 @@ public sealed class ComputerInventoryScannerTests
 public sealed class RunComputerInventoryDiagnosticUseCaseTests
 {
     [Fact]
-    public async Task ExecuteSavesRunAndUsesDemonstrationScoreWhenHistoryEnabled()
+    public async Task ExecuteSavesRunAndUsesScoreFromObservedChecksWhenHistoryEnabled()
     {
         var inventory = new ComputerInventory { ComputerName = "TEST-PC" };
         var history = new FakeHistory();
@@ -75,7 +75,7 @@ public sealed class RunComputerInventoryDiagnosticUseCaseTests
         Assert.True(outcome.HistorySaved);
         Assert.Null(outcome.PersistenceWarning);
         Assert.Same(inventory, outcome.Run.Inventory);
-        Assert.Equal(95, outcome.Run.HealthScore.Value);
+        Assert.Equal(100, outcome.Run.Report!.HealthScore!.Value.Value);
         Assert.Same(outcome.Run, history.SavedRun);
     }
 
@@ -101,16 +101,31 @@ public sealed class RunComputerInventoryDiagnosticUseCaseTests
         var outcome = await useCase.ExecuteAsync();
 
         Assert.Equal("SURVIVES", outcome.Run.Inventory.ComputerName);
+        Assert.NotNull(outcome.Run.Report);
         Assert.False(outcome.HistorySaved);
         Assert.NotNull(outcome.PersistenceWarning);
     }
 
     private static RunComputerInventoryDiagnosticUseCase CreateUseCase(ComputerInventory inventory, UserSettings settings, FakeHistory history) =>
-        new(new FakeScanner(inventory), history, new FakeSettings(settings), NullLogger<RunComputerInventoryDiagnosticUseCase>.Instance);
+        new(new FakeScanner(inventory), new FakeEngine(), history, new FakeSettings(settings), NullLogger<RunComputerInventoryDiagnosticUseCase>.Instance);
 
     private sealed class FakeScanner(ComputerInventory inventory) : IComputerInventoryScanner
     {
         public Task<ComputerInventory> ScanAsync(CancellationToken cancellationToken = default) => Task.FromResult(inventory);
+    }
+
+    private sealed class FakeEngine : IDiagnosticEngine
+    {
+        public Task<DiagnosticReport> RunAsync(CancellationToken cancellationToken = default)
+        {
+            var now = DateTimeOffset.UtcNow;
+            IReadOnlyList<DiagnosticResult> results =
+            [
+                new DiagnosticResult("Test", "Sistema", DiagnosticSeverity.Information, DiagnosticStatus.Healthy,
+                    "Coleta confirmada", "Observação de teste", "Nenhuma ação", "Fixture unitária", TimeSpan.Zero, now)
+            ];
+            return Task.FromResult(new DiagnosticReport(results, now, now, TimeSpan.Zero, new HealthScore(100)));
+        }
     }
 
     private sealed class FakeSettings(UserSettings settings) : IUserSettingsRepository
@@ -136,7 +151,7 @@ public sealed class RunComputerInventoryDiagnosticUseCaseTests
 public sealed class SqliteRepositoryTests
 {
     [Fact]
-    public async Task RepositoriesPersistAndRestoreSettingsAndInventoryUsingSqlite()
+    public async Task RepositoriesPersistAndRestoreSettingsInventoryAndDiagnosticReportUsingSqlite()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -151,13 +166,16 @@ public sealed class SqliteRepositoryTests
         Assert.False((await settings.GetAsync()).SaveDiagnosticHistory);
 
         var now = DateTimeOffset.UtcNow;
+        var result = new DiagnosticResult("Test", "Sistema", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
+            "Aviso de teste", "Descrição", "Recomendação", "Evidência sintética do teste", TimeSpan.FromMilliseconds(20), now);
+        var report = new DiagnosticReport([result], now.AddSeconds(-2), now, TimeSpan.FromSeconds(2), new HealthScore(92));
         var run = new DiagnosticRun(Guid.NewGuid(), now.AddSeconds(-2), now, TimeSpan.FromSeconds(2),
             new ComputerInventory
             {
                 ComputerName = "SQLITE-PC",
                 IPv4Addresses = ["192.0.2.10"],
                 PhysicalDisks = [new PhysicalDisk("\\\\.\\PHYSICALDRIVE0", "Samsung 990 Pro", 1_000_000_000_000, "SSD", "NVMe")]
-            }, new HealthScore(95));
+            }, report);
         await history.SaveAsync(run);
 
         var restored = await history.GetLatestAsync();
@@ -166,6 +184,7 @@ public sealed class SqliteRepositoryTests
         Assert.Equal("SQLITE-PC", restored.Inventory.ComputerName);
         Assert.Equal("192.0.2.10", Assert.Single(restored.Inventory.IPv4Addresses));
         Assert.Equal("Samsung 990 Pro", Assert.Single(restored.Inventory.PhysicalDisks).Model);
-        Assert.Equal(95, restored.HealthScore.Value);
+        Assert.Equal(92, restored.Report!.HealthScore!.Value.Value);
+        Assert.Equal("Evidência sintética do teste", Assert.Single(restored.Report.Results).Evidence);
     }
 }

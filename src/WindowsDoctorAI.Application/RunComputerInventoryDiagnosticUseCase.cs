@@ -6,9 +6,10 @@ namespace WindowsDoctorAI.Application;
 
 public sealed record DiagnosticOutcome(DiagnosticRun Run, bool HistorySaved, string? PersistenceWarning = null);
 
-/// <summary>Coordena a coleta e, quando habilitado nas preferências, o armazenamento local do resultado.</summary>
+/// <summary>Coordena inventário Milestone 1, plugins diagnósticos e, conforme preferência, histórico local.</summary>
 public sealed class RunComputerInventoryDiagnosticUseCase(
-    IComputerInventoryScanner scanner,
+    IComputerInventoryScanner inventoryScanner,
+    IDiagnosticEngine diagnosticEngine,
     IDiagnosticRunRepository history,
     IUserSettingsRepository settings,
     ILogger<RunComputerInventoryDiagnosticUseCase> logger)
@@ -16,10 +17,11 @@ public sealed class RunComputerInventoryDiagnosticUseCase(
     public async Task<DiagnosticOutcome> ExecuteAsync(CancellationToken cancellationToken = default)
     {
         var startedAt = DateTimeOffset.UtcNow;
-        var inventory = await scanner.ScanAsync(cancellationToken).ConfigureAwait(false);
+        var inventory = await inventoryScanner.ScanAsync(cancellationToken).ConfigureAwait(false);
+        var report = await diagnosticEngine.RunAsync(cancellationToken).ConfigureAwait(false);
         var completedAt = DateTimeOffset.UtcNow;
         var run = new DiagnosticRun(Guid.NewGuid(), startedAt, completedAt,
-            completedAt - startedAt, inventory, HealthScore.InitialMilestoneScore);
+            completedAt - startedAt, inventory, report);
 
         UserSettings preferences;
         try

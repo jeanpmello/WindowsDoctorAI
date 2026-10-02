@@ -40,6 +40,7 @@ public partial class App : Application
                 {
                     services.AddComputerInventoryDiagnostics();
                     services.AddWindowsDoctorInfrastructure(databasePath);
+                    services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();
                     services.AddTransient<RunComputerInventoryDiagnosticUseCase>();
                     services.AddSingleton<INavigationService, NavigationService>();
                     services.AddTransient<MainWindow>();

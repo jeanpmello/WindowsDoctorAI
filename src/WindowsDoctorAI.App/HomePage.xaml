@@ -30,7 +30,7 @@
         <StackPanel Padding="30,26,30,36" Spacing="20">
             <StackPanel Spacing="4">
                 <TextBlock Text="Windows Doctor AI" FontSize="30" FontWeight="SemiBold" />
-                <TextBlock Text="Visão geral e inventário deste computador" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="Diagnóstico, resultados e inventário deste computador" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
             <Grid ColumnDefinitions="2*,*" ColumnSpacing="16">
@@ -46,16 +46,43 @@
                             <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" MinWidth="128" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
-                            <TextBlock Text="{Binding HealthScore}" FontSize="56" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            <TextBlock Text="{Binding HealthScore}" FontSize="40" FontWeight="SemiBold" HorizontalAlignment="Center" TextWrapping="Wrap" />
                             <TextBlock Text="Health Score" HorizontalAlignment="Center" FontWeight="SemiBold" />
-                            <TextBlock Text="Valor demonstrativo" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                            <TextBlock Text="{Binding HealthScoreDescription}" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
                         </StackPanel>
                     </Grid>
                 </Border>
                 <Border Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="8" VerticalAlignment="Center">
-                        <TextBlock Text="Último diagnóstico" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="Última execução" Style="{StaticResource SectionTitleStyle}" />
                         <TextBlock Text="{Binding LastDiagnosticText}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
+                <Border Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="6"><TextBlock Text="Problemas críticos" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding CriticalProblemsText}" FontSize="24" FontWeight="SemiBold" /></StackPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="6"><TextBlock Text="Avisos" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding WarningsText}" FontSize="24" FontWeight="SemiBold" /></StackPanel>
+                </Border>
+                <Border Grid.Column="2" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="6"><TextBlock Text="Tempo do diagnóstico" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding DiagnosticDurationText}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" /></StackPanel>
+                </Border>
+            </Grid>
+
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                <Border Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Categorias" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="{Binding CategoriesSummary}" Style="{StaticResource FieldValueStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Achados e evidências" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="{Binding FindingsSummary}" Style="{StaticResource FieldValueStyle}" />
                     </StackPanel>
                 </Border>
             </Grid>

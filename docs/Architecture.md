@@ -1,56 +1,61 @@
 # Arquitetura
 
-**Estado:** solução do Milestone 1 implementada. O build e a execução da UI e da coleta WMI ainda devem ser validados em Windows; esta documentação não representa auditoria ou certificação.
+**Estado:** Milestones 1 e 2 têm implementação no repositório. A compilação e a execução da UI e das consultas dependentes do Windows ainda precisam ser validadas em Windows; este documento não representa certificação.
 
 ## Visão geral
 
-Windows Doctor AI é uma aplicação desktop WinUI 3, C#/.NET 9, organizada em Clean Architecture. O domínio descreve inventário e execução; contratos internos isolam scanner, preferências e histórico; o caso de uso coordena a coleta; adaptadores implementam WMI e SQLite; a aplicação WinUI compõe o grafo DI e apresenta os dados.
+Windows Doctor AI é uma aplicação desktop WinUI 3, C#/.NET 9, organizada em Clean Architecture. O domínio define inventário e resultados diagnósticos comuns; `Core` contém portas; `Application` orquestra o inventário e o Diagnostic Engine; `Diagnostics` implementa os plugins locais de leitura; `Reporting` formata relatórios; e a aplicação WinUI compõe dependências e apresenta o estado.
 
 ```text
 WindowsDoctorAI.sln
 ├── src/
-│   ├── WindowsDoctorAI.App/             # WinUI 3, MVVM, rotas, DI e logging
-│   ├── WindowsDoctorAI.Core/            # Portas independentes dos adaptadores
-│   ├── WindowsDoctorAI.Domain/          # Modelos e invariantes
-│   ├── WindowsDoctorAI.Application/     # Caso de uso de diagnóstico
-│   ├── WindowsDoctorAI.Infrastructure/ # Composição do adaptador SQLite
-│   ├── WindowsDoctorAI.Diagnostics/    # Scanner e fonte WMI Windows
-│   ├── WindowsDoctorAI.Repair/          # Contrato vazio de catálogo; sem executor
-│   ├── WindowsDoctorAI.AI/              # Contrato opcional; sem provedor
-│   ├── WindowsDoctorAI.Reporting/       # Formatador de inventário em texto
-│   └── WindowsDoctorAI.Database/        # DbContext EF Core e repositórios SQLite
+│   ├── WindowsDoctorAI.App/             # WinUI 3, MVVM, composição e dashboard
+│   ├── WindowsDoctorAI.Core/            # IDiagnosticScanner, IDiagnosticEngine e portas
+│   ├── WindowsDoctorAI.Domain/          # Inventário, DiagnosticResult e DiagnosticReport
+│   ├── WindowsDoctorAI.Application/     # DiagnosticEngine e caso de uso coordenador
+│   ├── WindowsDoctorAI.Diagnostics/    # Plugins e adaptador local de APIs Windows
+│   ├── WindowsDoctorAI.Reporting/      # Formatadores de relatório em texto
+│   ├── WindowsDoctorAI.Database/       # DbContext EF Core e repositórios SQLite
+│   ├── WindowsDoctorAI.Infrastructure/ # Composição dos adaptadores SQLite
+│   ├── WindowsDoctorAI.AI/             # Integração opcional, sem provedor ativo
+│   └── WindowsDoctorAI.Repair/          # Catálogo sem executor de reparos
 └── tests/WindowsDoctorAI.Tests/         # xUnit e testes SQLite em memória
 ```
 
-## Direção de dependências
+## Contrato e execução
 
-- `Domain` não depende de infraestrutura ou UI.
-- `Core` referencia os tipos de domínio usados nas portas; não referencia UI, WMI, EF Core ou APIs externas.
-- `Application` depende de `Core` e `Domain`, não de WinUI nem de banco concreto.
-- `Diagnostics` implementa o contrato de scanner; a consulta ao WMI é um adaptador Windows substituível por fonte simulada.
-- `Database` implementa os repositórios com EF Core/SQLite. `Infrastructure` expõe o registro das implementações para a composição.
-- `App` é o composition root; configura Hosting, Configuration, Logging, DI, rotas e páginas WinUI.
-- `AI`, `Repair` e `Reporting` permanecem separados. O milestone não registra serviço externo de IA nem executor de reparo.
+`DiagnosticResult` fornece o formato compartilhado `ScannerName`, `Category`, `Severity`, `Status`, `Title`, `Description`, `Recommendation`, `Evidence`, `Duration` e `Timestamp`. `IDiagnosticScanner` é o contrato dos plugins, e `IDiagnosticEngine` coordena todos os scanners registrados no contêiner de dependências.
 
-## Fluxo de diagnóstico implementado
+O engine inicia em paralelo os plugins que declaram `SupportsParallelExecution`; os que não declaram segurança concorrente executam sequencialmente. Uma falha de plugin produz um resultado `Unavailable`, é registrada e não interrompe os demais. O engine normaliza nome/categoria, substitui duração e horário pelos valores medidos e consolida resultados em `DiagnosticReport`.
 
-1. O usuário inicia a ação **Iniciar Diagnóstico**.
-2. `RunComputerInventoryDiagnosticUseCase` solicita `IComputerInventoryScanner` e cria uma execução com score demonstrativo fixo em 95.
-3. `ComputerInventoryScanner` delega a `IComputerInventoryDataSource`; no Windows, `WindowsManagementInventoryDataSource` usa WMI, APIs de rede, tipo de firmware e registro local para ler os campos suportados.
-4. As informações são exibidas no dashboard. Se a opção de histórico estiver habilitada, a execução é serializada em JSON e gravada em `DiagnosticRuns`, no SQLite local.
-5. Falhas ao persistir são reportadas sem descartar o resultado já coletado; falhas individuais WMI são registradas com o nome da consulta e deixam o campo correspondente indisponível.
+Estados `Unavailable` e `NotVerified` não são tratados como saúde nem entram no Health Score. O score desta etapa usa a regra explícita **100 − 25 por achado crítico − 8 por aviso**, limitada a 0–100; só é exibido se ao menos uma verificação tiver sido confirmada. É uma métrica heurística desta etapa, não uma garantia de saúde global. A cobertura por categoria indica verificações incompletas. Os scanners atuais cobrem Sistema, Drivers e Hardware; Rede e Segurança aparecem como não verificadas, pois não há plugins desses domínios neste milestone.
 
-A coleta não executa correções. Campos podem estar ausentes conforme firmware, hardware, versão do Windows e permissões. O score não é calculado a partir de achados e não deve ser interpretado como diagnóstico de saúde.
+## Plugins incluídos e limites da coleta
 
-## Persistência e configuração
+Os plugins são registrados em `AddWindowsDiagnosticPlugins` no assembly de diagnósticos. O conjunto atual é: Windows Update (busca do Windows Update Agent, marcadores de reinicialização e eventos recentes); Services (serviços centrais, inicialização, estados automáticos parados e dependências); Drivers (códigos de configuração Plug and Play, inclusive código 28); Disk (SMART, status geral de disco, espaço livre e temperatura SMART quando a interface expõe o atributo); e Event Viewer (logs System, Application e Windows Update).
 
-O arquivo do banco fica em `%LOCALAPPDATA%\WindowsDoctorAI\windowsdoctorai.db`. O schema inicial é criado com `EnsureCreated`; migrações versionadas ainda não existem. A configuração JSON e variáveis de ambiente `WINDOWSDOCTORAI_` são carregadas no App; logs são enviados ao provider Debug. O diretório e as tabelas estão descritos em [Database](Database.md).
+As consultas dependem de APIs e componentes locais do Windows: Windows Update Agent/COM e Registro, WMI (`Win32_Service`, `Win32_PnPEntity`, classes de disco/SMART) e Windows Event Log. Falta de permissão, classe ausente, controladora ou hardware sem suporte resulta em `Unavailable` ou `NotVerified`; não é convertido em resultado saudável. O caminho de temperatura usa atributos SMART ATA 190/194 quando legíveis e não aplica um limite universal por modelo.
 
-## Limites e próximo trabalho
+Para limitar o volume, a análise do Event Viewer lê eventos Critical, Error e Warning dos três logs nos últimos sete dias, até 100 registros recentes por log. O Windows Update procura eventos recentes no log operacional dos últimos 14 dias, até 100 registros. Espaço livre abaixo de 10% gera achado crítico e abaixo de 20% gera aviso; são limiares operacionais gerais. Serviços parados por gatilho, dispositivos desativados/não conectados e estados sem classificação não são automaticamente tratados como falhas.
 
-- Executar build, abrir as telas e validar consultas WMI em uma máquina Windows representativa.
-- Criar migrações EF Core antes de evolução compatível do schema.
-- Substituir score demonstrativo por metodologia explicável e versionada.
-- Projetar regras de retenção e remoção do histórico; a opção atual apenas impede novas gravações.
-- Definir matriz de Windows/hardware e avaliar o ciclo de suporte do .NET 9 antes de produção.
-- Introduzir IA, plugins e correções somente após requisitos, consentimento e controles próprios.
+A coleta é local e somente de leitura: não instala atualizações ou drivers, não inicia/para serviços, não modifica o Registro nem apaga arquivos. Recomendações descrevem revisão manual e não são executadas.
+
+## Extensão segura
+
+Um plugin implementa `IDiagnosticScanner`, retorna a lista comum de `DiagnosticResult` e declara se pode executar em paralelo. Os módulos registrados pelo agregador `AddWindowsDiagnosticPlugins` são resolvidos automaticamente pelo engine via `IEnumerable<IDiagnosticScanner>`. Um novo domínio pode ser implementado em outro módulo/projeto e ligado ao agregador de plugins sem modificar `Core`, o `DiagnosticEngine`, o caso de uso ou a implementação do app; o app mantém uma única chamada ao registro do conjunto de diagnósticos.
+
+Essa extensão permite planejar módulos independentes para SQL Server, Exchange, VMware, Docker, Microsoft 365 ou Proxmox, com contratos de dados e permissões próprios. Esta etapa **não** carrega DLLs arbitrárias de diretórios: plugins são código confiável explicitamente incluído e registrado, não executáveis descobertos automaticamente em disco.
+
+## Dashboard, relatório e histórico
+
+O caso de uso executa o scanner de inventário existente e o Diagnostic Engine, preserva o inventário e agrega o `DiagnosticReport` na execução. O dashboard exibe score calculado ou não calculado, achados críticos, avisos, duração, última execução, cobertura e evidências. A tela limita os achados mostrados a dez; o formatador `DiagnosticReportFormatter` mantém os resultados completos para geração de texto.
+
+O SQLite continua sem mudança de schema: o JSON da execução agora inclui o relatório. Registros antigos do Milestone 1, que não contêm `Report`, continuam úteis para o inventário; o dashboard informa que não há score diagnóstico calculável, sem reaproveitar o antigo valor demonstrativo como saúde real.
+
+## Limites e validação pendente
+
+- Compilar a solution e validar XAML/WinUI com Windows App SDK em Windows.
+- Exercitar WUA, Registro, WMI, Event Viewer, SMART e permissões em diferentes versões/edições e hardware Windows.
+- Medir falsos positivos dos limites gerais de espaço, lista de serviços centrais e telemetria SMART em máquinas representativas.
+- Testar exportação/retensão de relatórios e histórico com política de privacidade explícita.
+- Knowledge Base, análise por IA e reparos continuam fora deste milestone.
