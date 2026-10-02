@@ -9,6 +9,7 @@ public sealed class WindowsUpdateDiagnosticScanner(IWindowsDiagnosticDataSource 
 {
     private static readonly Regex FailureText = new(@"(fail|failed|failure|error|falha|falhou|erro)", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex ErrorCode = new(@"\b0x[0-9a-fA-F]{8}\b", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex ExactCbsHresult = new(@"(?<![A-Za-z0-9_])0x800F0831(?![A-Za-z0-9_])", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public string Name => "Windows Update";
     public string Category => "Sistema";
@@ -84,7 +85,17 @@ public sealed class WindowsUpdateDiagnosticScanner(IWindowsDiagnosticDataSource 
                         string.IsNullOrWhiteSpace(failure.Message) ? "O log registrou um evento de erro/criticidade sem descrição legível." : failure.Message,
                         "Pesquise o código e os detalhes deste evento no Windows Update; nenhuma correção foi aplicada.",
                         $"Log=Windows Update; ID={failure.EventId}; nível={(failure.Level == 1 ? "Critical" : "Error")}; data={time}; código {(code.Length == 0 ? "não identificado no texto" : code)}.");
-                    results.Add(result with { SourceMetadata = DiagnosticSourceMetadata.FromEventProvider(failure.Provider) });
+                    var provider = DiagnosticSourceMetadata.FromEventProvider(failure.Provider);
+                    var currentRunEvent = provider is not null
+                        && string.Equals(failure.LogName, WindowsUpdateEventEvidence.OperationalChannel, StringComparison.OrdinalIgnoreCase)
+                        && ExactCbsHresult.IsMatch(failure.Message ?? string.Empty)
+                            ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
+                            : null;
+                    results.Add(result with
+                    {
+                        SourceMetadata = provider,
+                        WindowsUpdateEventEvidence = currentRunEvent
+                    });
                 }
             }
         }

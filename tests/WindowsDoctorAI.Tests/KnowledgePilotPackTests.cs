@@ -135,6 +135,10 @@ public sealed class KnowledgePilotPackTests
             DiagnosticSourceMetadata.FromEventProvider("Microsoft-Windows-WindowsUpdateClient"))), [cbsRule]));
         Assert.Empty(engine.Recommend(CreateReport(diagnostic! with
         {
+            WindowsUpdateEventEvidence = new WindowsUpdateEventEvidence("System", "0x800F0831")
+        }), [cbsRule]));
+        Assert.Empty(engine.Recommend(CreateReport(diagnostic! with
+        {
             CbsEvidence = new CbsPackageEvidence(CbsEvidenceType.ManifestMissing, "C:\\Sensitive\\private.cab")
         }), [cbsRule]));
         Assert.Empty(engine.Recommend(CreateReport(diagnostic! with

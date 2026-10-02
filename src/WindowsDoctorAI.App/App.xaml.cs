@@ -12,6 +12,7 @@ using WindowsDoctorAI.Diagnostics;
 using WindowsDoctorAI.Infrastructure;
 using WindowsDoctorAI.Reporting;
 using WindowsDoctorAI.Repair;
+using WinRT.Interop;
 
 namespace WindowsDoctorAI.App;
 
@@ -46,6 +47,12 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                     services.AddWindowsDoctorInfrastructure(databasePath);
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();
                     services.AddTransient<RunComputerInventoryDiagnosticUseCase>();
+                    services.AddSingleton<IWindowsUpdateCbsLogAnalyzer, WindowsUpdateCbsLogAnalyzer>();
+                    services.AddTransient<CbsLogImportService>();
+                    services.AddTransient<ICbsLogFilePicker>(_ => new WinUiCbsLogFilePicker(() =>
+                        _mainWindow is null
+                            ? throw new InvalidOperationException("A janela principal não está disponível para abrir o seletor de arquivos.")
+                            : WindowNative.GetWindowHandle(_mainWindow)));
                     services.AddTransient<DiagnosticHistoryMaintenanceService>();
                     services.AddTransient<DiagnosticPreferencesService>();
                     services.AddSingleton<RecommendationEngine>();

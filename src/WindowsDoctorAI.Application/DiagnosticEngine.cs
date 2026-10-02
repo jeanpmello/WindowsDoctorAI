@@ -121,6 +121,16 @@ public sealed class DiagnosticEngine : IDiagnosticEngine
 
         var severity = Enum.IsDefined(result.Severity) ? result.Severity : DiagnosticSeverity.Information;
         var status = Enum.IsDefined(result.Status) ? result.Status : DiagnosticStatus.NotVerified;
+        var sourceMetadata = DiagnosticSourceMetadata.FromEventProvider(result.SourceMetadata?.Provider);
+        var eventEvidence = sourceMetadata is not null
+            && result.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true }
+                ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
+                : null;
+        var cbsEvidence = result.CbsEvidence is { } cbs
+            && Enum.IsDefined(cbs.Type)
+            && CbsPackageIdentityValidator.IsValid(cbs.PackageIdentity)
+                ? cbs
+                : null;
         return new DiagnosticResult(
             scanner.Name,
             string.IsNullOrWhiteSpace(scanner.Category) ? "Sem categoria" : scanner.Category,
@@ -131,7 +141,12 @@ public sealed class DiagnosticEngine : IDiagnosticEngine
             result.Recommendation ?? string.Empty,
             result.Evidence ?? "Evidência não fornecida pelo plugin.",
             duration,
-            timestamp);
+            timestamp)
+        {
+            SourceMetadata = sourceMetadata,
+            WindowsUpdateEventEvidence = eventEvidence,
+            CbsEvidence = cbsEvidence
+        };
     }
 
     private static DiagnosticResult NewResult(

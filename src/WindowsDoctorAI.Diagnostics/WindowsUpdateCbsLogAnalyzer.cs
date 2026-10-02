@@ -1,15 +1,14 @@
 using System.Text.RegularExpressions;
+using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Domain;
 
 namespace WindowsDoctorAI.Diagnostics;
 
-/// <summary>
-/// Analisa texto fornecido pelo chamador sem abrir arquivos, executar comandos ou preservar mensagens brutas.
-/// </summary>
-public sealed class WindowsUpdateCbsLogAnalyzer
+/// <summary>Analisa texto fornecido pelo chamador sem abrir arquivos, executar comandos ou preservar mensagens brutas.</summary>
+public sealed class WindowsUpdateCbsLogAnalyzer : IWindowsUpdateCbsLogAnalyzer
 {
-    public const string WindowsUpdateOperationalChannel = "Microsoft-Windows-WindowsUpdateClient/Operational";
-    private const int MaximumInputCharacters = 2 * 1024 * 1024;
+    public const string WindowsUpdateOperationalChannel = WindowsUpdateEventEvidence.OperationalChannel;
+    public const int MaximumInputCharacters = 2 * 1024 * 1024;
     private const int MaximumLineCharacters = 4096;
 
     private static readonly Regex ExactHresult = new(
@@ -25,15 +24,25 @@ public sealed class WindowsUpdateCbsLogAnalyzer
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(50));
 
-    /// <summary>Retorna null salvo evento/canal/provider/HRESULT exatos e linha CBS completa com identidade válida.</summary>
+    /// <summary>Compatibilidade para consumidores que já fornecem o evento estruturado in-memory.</summary>
     public DiagnosticResult? Analyze(string? cbsLogText, DiagnosticEvent? windowsUpdateEvent)
     {
-        if (string.IsNullOrEmpty(cbsLogText)
-            || cbsLogText.Length > MaximumInputCharacters
-            || windowsUpdateEvent is null
+        if (windowsUpdateEvent is null
             || !string.Equals(windowsUpdateEvent.LogName, WindowsUpdateOperationalChannel, StringComparison.OrdinalIgnoreCase)
             || DiagnosticSourceMetadata.NormalizeProvider(windowsUpdateEvent.Provider) is null
-            || !ExactHresult.IsMatch(windowsUpdateEvent.Message ?? string.Empty)
+            || !ExactHresult.IsMatch(windowsUpdateEvent.Message ?? string.Empty))
+            return null;
+
+        return AnalyzeWithCurrentRunEvent(cbsLogText,
+            new WindowsUpdateEventEvidence(WindowsUpdateOperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult));
+    }
+
+    /// <summary>Retorna null salvo evidência de evento tipada e linha CBS completa com identidade validada.</summary>
+    public DiagnosticResult? AnalyzeWithCurrentRunEvent(string? cbsLogText, WindowsUpdateEventEvidence? eventEvidence)
+    {
+        if (eventEvidence is not { IsExactCbsStoreCorruptionEvent: true }
+            || string.IsNullOrEmpty(cbsLogText)
+            || cbsLogText.Length > MaximumInputCharacters
             || !(cbsLogText.EndsWith('\n') || cbsLogText.EndsWith('\r'))
             || cbsLogText.Any(character => char.IsControl(character) && character is not ('\r' or '\n' or '\t')))
             return null;
@@ -71,22 +80,22 @@ public sealed class WindowsUpdateCbsLogAnalyzer
             ? CbsEvidenceType.ManifestMissing
             : CbsEvidenceType.FailedToResolvePackage;
         var identity = packageIdentities.Single();
-        var result = new DiagnosticResult(
+        return new DiagnosticResult(
             "Windows Update",
             "Sistema",
             DiagnosticSeverity.Warning,
             DiagnosticStatus.Finding,
             "Evidência CBS de pacote ausente ou não resolvido",
-            "O evento WindowsUpdateClient contém 0x800F0831 e o texto fornecido contém um marcador CBS reconhecido.",
-            "Confirme manualmente a atualização e a identidade do pacote com suporte técnico; este achado não executa nem prescreve reparo.",
+            "A execução diagnóstica atual confirmou 0x800F0831 e o CBS.log selecionado contém um marcador e uma package identity reconhecidos.",
+            "Confirme manualmente a atualização e a identidade tipada do pacote com o suporte responsável. Esta evidência é informativa; não prescreve nem executa reparo.",
             $"CBS marker={selectedType}; package identity={identity}",
             TimeSpan.Zero,
             DateTimeOffset.UtcNow)
         {
             SourceMetadata = new DiagnosticSourceMetadata(DiagnosticSourceMetadata.WindowsUpdateClientProvider),
-            CbsEvidence = new CbsPackageEvidence(selectedType, identity)
+            CbsEvidence = new CbsPackageEvidence(selectedType, identity),
+            WindowsUpdateEventEvidence = new WindowsUpdateEventEvidence(
+                WindowsUpdateOperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
         };
-
-        return result;
     }
 }

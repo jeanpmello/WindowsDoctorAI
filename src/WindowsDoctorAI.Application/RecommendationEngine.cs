@@ -26,6 +26,11 @@ public sealed class RecommendationEngine
                     var sourceProvider = finding.SourceMetadata is { } sourceMetadata
                         ? DiagnosticSourceMetadata.NormalizeProvider(sourceMetadata.Provider)
                         : null;
+                    var currentRunEventMatches = !string.Equals(
+                            strictMatch.ExactErrorCode,
+                            WindowsUpdateEventEvidence.CbsStoreCorruptionHresult,
+                            StringComparison.OrdinalIgnoreCase)
+                        || finding.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true };
                     var requiredEvidenceTypes = strictMatch.RequiredEvidenceTypes ?? Array.Empty<string>();
                     var evidenceTypeMatches = requiredEvidenceTypes.Count == 0
                         || finding.CbsEvidence is { } cbsEvidence
@@ -38,6 +43,7 @@ public sealed class RecommendationEngine
                     if (!strictMatch.ScannerNames.Contains(finding.ScannerName, StringComparer.OrdinalIgnoreCase)
                         || !strictMatch.RequiredContextTerms.All(term => ContainsPhrase(searchable, term))
                         || !strictMatch.RequiredSourceProviders.All(provider => string.Equals(sourceProvider, provider, StringComparison.OrdinalIgnoreCase))
+                        || !currentRunEventMatches
                         || !evidenceTypeMatches
                         || !ContainsToken(searchable, strictMatch.ExactErrorCode))
                         continue;

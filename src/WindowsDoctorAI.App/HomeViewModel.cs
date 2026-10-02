@@ -15,6 +15,7 @@ public partial class HomeViewModel(
     IKnowledgeRepository knowledgeRepository,
     KnowledgeJsonImporter knowledgeImporter,
     DiagnosticAssessmentService assessmentService,
+    CbsLogImportService cbsLogImportService,
     ILogger<HomeViewModel> logger) : ObservableObject
 {
     private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
@@ -55,17 +56,27 @@ public partial class HomeViewModel(
     [ObservableProperty] private string _packageReviewStatus = "Selecione um pacote JSON para validar e revisar os metadados antes da importação.";
     [ObservableProperty] private bool _canImportKnowledgePackage;
     [ObservableProperty] private bool _canExportHtmlReport;
+    [ObservableProperty] private bool _canAnalyzeCbsLog;
+    [ObservableProperty] private bool _isAnalyzingCbsLog;
+    [ObservableProperty] private string _cbsLogAnalysisStatus = "Execute um diagnóstico nesta sessão para habilitar a análise de um CBS.log selecionado.";
+    [ObservableProperty] private string _cbsLogSource = string.Empty;
+    [ObservableProperty] private string _cbsLogSignal = string.Empty;
+    [ObservableProperty] private string _cbsLogRecommendation = string.Empty;
     [ObservableProperty] private bool _isImportingPackage;
     [ObservableProperty] private bool _canSelectKnowledgePackage = true;
 
     private string? _pendingPackageJson;
     private DiagnosticRun? _currentRun;
+    private bool _currentRunWasExecutedThisSession;
 
     partial void OnIsScanningChanged(bool value)
     {
         StartDiagnosticCommand.NotifyCanExecuteChanged();
         UpdateImportCommandState();
+        UpdateCbsLogCommandState();
     }
+
+    partial void OnIsAnalyzingCbsLogChanged(bool value) => UpdateCbsLogCommandState();
 
     partial void OnIsImportingPackageChanged(bool value)
     {
@@ -80,6 +91,25 @@ public partial class HomeViewModel(
     {
         CanImportKnowledgePackage = CanImportKnowledge();
         ImportKnowledgePackageCommand.NotifyCanExecuteChanged();
+    }
+
+    private void UpdateCbsLogCommandState()
+    {
+        CanAnalyzeCbsLog = !IsScanning
+            && !IsAnalyzingCbsLog
+            && _currentRunWasExecutedThisSession
+            && CbsLogImportService.HasCurrentRunEvent(_currentRun);
+        AnalyzeCbsLogCommand.NotifyCanExecuteChanged();
+    }
+
+    private bool CanAnalyzeCurrentCbsLog() => CanAnalyzeCbsLog;
+
+    private void ResetCbsLogAnalysis(string status)
+    {
+        CbsLogAnalysisStatus = status;
+        CbsLogSource = string.Empty;
+        CbsLogSignal = string.Empty;
+        CbsLogRecommendation = string.Empty;
     }
 
     public Task PreviewKnowledgePackageAsync(string json)
@@ -187,15 +217,74 @@ public partial class HomeViewModel(
     public void ReportHtmlSaveFailed(string message) =>
         StatusMessage = "Não foi possível salvar o relatório HTML no destino escolhido.";
 
+    [RelayCommand(CanExecute = nameof(CanAnalyzeCurrentCbsLog))]
+    private async Task AnalyzeCbsLogAsync()
+    {
+        IsAnalyzingCbsLog = true;
+        ResetCbsLogAnalysis("Aguardando a seleção do arquivo; o conteúdo será analisado somente em memória.");
+        try
+        {
+            var outcome = await cbsLogImportService.ImportAndAnalyzeAsync(
+                _currentRunWasExecutedThisSession ? _currentRun : null);
+            switch (outcome.Status)
+            {
+                case CbsLogImportStatus.Cancelled:
+                    ResetCbsLogAnalysis("Seleção cancelada; nenhum arquivo foi analisado.");
+                    break;
+                case CbsLogImportStatus.FileReadFailed:
+                    ResetCbsLogAnalysis("O arquivo selecionado está ausente ou inacessível; nenhum conteúdo foi retido.");
+                    break;
+                case CbsLogImportStatus.FileTooLarge:
+                    ResetCbsLogAnalysis($"O arquivo excede o limite de {CbsLogImportService.MaximumFileBytes / 1024 / 1024} MiB; nenhum conteúdo foi retido.");
+                    break;
+                case CbsLogImportStatus.UnsupportedEncoding:
+                    ResetCbsLogAnalysis("Codificação inválida ou não suportada. Use UTF-8 (com ou sem BOM) ou UTF-16 com BOM.");
+                    break;
+                case CbsLogImportStatus.NoCurrentRunEvent:
+                    ResetCbsLogAnalysis("A execução diagnóstica atual não contém o evento operacional WindowsUpdateClient com 0x800F0831; nenhum achado foi produzido.");
+                    break;
+                case CbsLogImportStatus.NoRecognizedEvidence:
+                    ResetCbsLogAnalysis("Não foi reconhecido um marcador CBS com package identity válida; nenhum achado foi produzido.");
+                    break;
+                case CbsLogImportStatus.Finding when outcome.Result?.CbsEvidence is { } cbsEvidence:
+                    CbsLogAnalysisStatus = "Evidência reconhecida em memória. O texto original não foi retido.";
+                    CbsLogSource = "Origem: CBS.log importado";
+                    CbsLogSignal = cbsEvidence.Type switch
+                    {
+                        CbsEvidenceType.ManifestMissing => "Sinal: marcador de manifesto ausente reconhecido.",
+                        CbsEvidenceType.FailedToResolvePackage => "Sinal: marcador de pacote não resolvido reconhecido.",
+                        _ => "Sinal CBS reconhecido."
+                    };
+                    CbsLogRecommendation = outcome.Result.Recommendation;
+                    break;
+                default:
+                    ResetCbsLogAnalysis("Não foi possível produzir um resultado CBS seguro.");
+                    break;
+            }
+        }
+        finally
+        {
+            IsAnalyzingCbsLog = false;
+        }
+    }
+
     [RelayCommand(CanExecute = nameof(CanStartDiagnostic))]
     private async Task StartDiagnosticAsync()
     {
+        _currentRunWasExecutedThisSession = false;
+        ResetCbsLogAnalysis("Execute um diagnóstico nesta sessão para habilitar a análise de um CBS.log selecionado.");
+        UpdateCbsLogCommandState();
         IsScanning = true;
         StatusMessage = "Coletando inventário e verificações locais somente de leitura. Nenhuma correção será aplicada.";
         try
         {
             var outcome = await runDiagnostic.ExecuteAsync();
             _currentRun = outcome.Run;
+            _currentRunWasExecutedThisSession = true;
+            UpdateCbsLogCommandState();
+            CbsLogAnalysisStatus = CbsLogImportService.HasCurrentRunEvent(outcome.Run)
+                ? "A execução atual contém o evento necessário; selecione um CBS.log para correlacionar a evidência."
+                : "A execução atual não contém o evento operacional WindowsUpdateClient com 0x800F0831; não haverá recomendação CBS.";
             CanExportHtmlReport = true;
             DisplayInventory(outcome.Run.Inventory);
             DisplayReport(outcome.Run.Report, outcome.Run.Duration, outcome.Run.Inventory);
@@ -212,11 +301,15 @@ public partial class HomeViewModel(
         finally
         {
             IsScanning = false;
+            UpdateCbsLogCommandState();
         }
     }
 
     public async Task LoadLatestAsync(CancellationToken cancellationToken = default)
     {
+        _currentRunWasExecutedThisSession = false;
+        ResetCbsLogAnalysis("A análise de CBS.log exige uma execução diagnóstica iniciada nesta sessão.");
+        UpdateCbsLogCommandState();
         await RefreshKnowledgeBaseStatusAsync(cancellationToken);
         try
         {

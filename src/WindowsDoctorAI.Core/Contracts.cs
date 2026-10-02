@@ -32,6 +32,18 @@ public interface IDiagnosticEngine
     Task<DiagnosticReport> RunAsync(CancellationToken cancellationToken = default);
 }
 
+/// <summary>Abstrai o seletor manual de CBS.log; null indica cancelamento e o stream deve ser somente leitura.</summary>
+public interface ICbsLogFilePicker
+{
+    Task<Stream?> PickCbsLogAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>Analisa conteúdo em memória somente quando recebe evidência tipada do evento da execução atual.</summary>
+public interface IWindowsUpdateCbsLogAnalyzer
+{
+    DiagnosticResult? AnalyzeWithCurrentRunEvent(string? cbsLogText, WindowsUpdateEventEvidence? eventEvidence);
+}
+
 public interface IDiagnosticRunRepository
 {
     Task SaveAsync(DiagnosticRun run, CancellationToken cancellationToken = default);

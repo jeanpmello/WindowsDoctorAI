@@ -60,6 +60,25 @@
                 </Border>
             </Grid>
 
+            <Border Style="{StaticResource InventoryCardStyle}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Análise manual de CBS.log" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBlock Text="Selecione um arquivo .log após uma execução diagnóstica atual com o evento WindowsUpdateClient/Operational 0x800F0831. O limite é 2 MiB; o conteúdo é lido somente em memória e não é salvo." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Content="Selecionar CBS.log e analisar" Command="{Binding AnalyzeCbsLogCommand}" IsEnabled="{Binding CanAnalyzeCbsLog}" />
+                        <ProgressRing IsActive="{Binding IsAnalyzingCbsLog}" Width="22" Height="22" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding CbsLogAnalysisStatus}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding CbsLogSource}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding CbsLogSignal}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding CbsLogRecommendation}" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="16">
+                        <HyperlinkButton Content="Documentação Microsoft: erro 0x800F0831" NavigateUri="https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/error-0x800f0831-installing-update" />
+                        <HyperlinkButton Content="Solução de problemas de Windows Update" NavigateUri="https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/troubleshoot-windows-update-installation-error-corruption" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
             <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
                 <Border Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="6"><TextBlock Text="Problemas críticos" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding CriticalProblemsText}" FontSize="24" FontWeight="SemiBold" /></StackPanel>

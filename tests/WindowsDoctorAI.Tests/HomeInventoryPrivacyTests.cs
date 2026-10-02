@@ -3,6 +3,7 @@ using WindowsDoctorAI.App;
 using WindowsDoctorAI.Application;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Domain;
+using WindowsDoctorAI.Diagnostics;
 using WindowsDoctorAI.Reporting;
 
 namespace WindowsDoctorAI.Tests;
@@ -62,6 +63,7 @@ public sealed class HomeInventoryPrivacyTests
             knowledge, new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
         var viewModel = new HomeViewModel(
             useCase, history, knowledge, new KnowledgeJsonImporter(knowledge), assessment,
+            new CbsLogImportService(new NoCbsLogPicker(), new WindowsUpdateCbsLogAnalyzer()),
             NullLogger<HomeViewModel>.Instance);
 
         DiagnosticRun originalRun;
@@ -145,5 +147,10 @@ public sealed class HomeInventoryPrivacyTests
 
         public Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class NoCbsLogPicker : ICbsLogFilePicker
+    {
+        public Task<Stream?> PickCbsLogAsync(CancellationToken cancellationToken = default) => Task.FromResult<Stream?>(null);
     }
 }

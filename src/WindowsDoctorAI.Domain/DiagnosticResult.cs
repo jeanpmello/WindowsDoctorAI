@@ -39,6 +39,17 @@ public sealed record DiagnosticSourceMetadata(string Provider)
             : null;
 }
 
+/// <summary>Prova minimizada do canal e HRESULT observados em um evento da execução atual.</summary>
+public sealed record WindowsUpdateEventEvidence(string LogName, string ErrorCode)
+{
+    public const string OperationalChannel = "Microsoft-Windows-WindowsUpdateClient/Operational";
+    public const string CbsStoreCorruptionHresult = "0x800F0831";
+
+    public bool IsExactCbsStoreCorruptionEvent =>
+        string.Equals(LogName, OperationalChannel, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(ErrorCode, CbsStoreCorruptionHresult, StringComparison.OrdinalIgnoreCase);
+}
+
 /// <summary>Marcadores CBS da Microsoft aceitos para diagnóstico de pacote ausente/resolução falha.</summary>
 public enum CbsEvidenceType
 {
@@ -79,6 +90,9 @@ public sealed record DiagnosticResult(
 
     /// <summary>Evidência CBS minimizada; texto bruto, caminho e conteúdo do evento não são armazenados aqui.</summary>
     public CbsPackageEvidence? CbsEvidence { get; init; }
+
+    /// <summary>Canal/HRESULT tipados e minimizados do evento Windows Update desta execução.</summary>
+    public WindowsUpdateEventEvidence? WindowsUpdateEventEvidence { get; init; }
 }
 
 /// <summary>Resumo da cobertura real por categoria, sem tratar indisponibilidade como saúde.</summary>

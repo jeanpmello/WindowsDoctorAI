@@ -203,6 +203,40 @@ public sealed class DiagnosticScannerPluginTests
     }
 
     [Fact]
+    public async Task CurrentRunRetainsOnlyTyped800f0831EventProofAfterRedaction()
+    {
+        const string privatePath = @"C:\Users\private.user\CBS.log";
+        const string privateHost = "PRIVATE-CBS-HOST-44";
+        const string privateToken = "private-event-token-44";
+        var source = new FakeWindowsDiagnosticDataSource
+        {
+            WindowsUpdate = new WindowsUpdateProbe(
+                ProbeResult<IReadOnlyList<PendingWindowsUpdate>>.Unavailable("Not configured"),
+                ProbeResult<bool>.Unavailable("Not configured"),
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available(
+                [
+                    new DiagnosticEvent(20, WindowsUpdateEventEvidence.OperationalChannel,
+                        "Microsoft-Windows-WindowsUpdateClient", 2, DateTimeOffset.UtcNow,
+                        $"Install failed with 0x800F0831; path={privatePath}; host={privateHost}; token={privateToken}")
+                ]))
+        };
+        var engine = new DiagnosticEngine([new WindowsUpdateDiagnosticScanner(source)], NullLogger<DiagnosticEngine>.Instance);
+
+        var report = await engine.RunAsync();
+        var eventResult = Assert.Single(report.Results, result => result.Title.Contains("ID 20", StringComparison.Ordinal));
+        var redacted = Assert.Single(DiagnosticPrivacyRedactor.RedactReport(report)!.Results,
+            result => result.WindowsUpdateEventEvidence is not null);
+
+        Assert.Equal("WindowsUpdateClient", eventResult.SourceMetadata?.Provider);
+        Assert.True(eventResult.WindowsUpdateEventEvidence?.IsExactCbsStoreCorruptionEvent);
+        Assert.Equal(eventResult.WindowsUpdateEventEvidence, redacted.WindowsUpdateEventEvidence);
+        var serialized = System.Text.Json.JsonSerializer.Serialize(redacted);
+        Assert.DoesNotContain(privatePath, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateHost, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateToken, serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ServicesPluginFindsStoppedCriticalServiceStartupMisconfigurationAndDependencies()
     {
         var source = new FakeWindowsDiagnosticDataSource

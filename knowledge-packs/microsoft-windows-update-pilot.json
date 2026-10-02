@@ -117,17 +117,17 @@
         "requiredEvidenceTypes": ["ManifestMissing", "FailedToResolvePackage"]
       },
       "requiredEvidence": [
-        "HRESULT exato 0x800F0831 em evento do canal WindowsUpdateClient/Operational",
+        "HRESULT exato 0x800F0831 tipado a partir do evento WindowsUpdateClient/Operational da execução diagnóstica atual",
         "Provider estruturado WindowsUpdateClient no achado",
         "Marcador CBS Microsoft de manifest missing ou Failed to resolve package",
         "Package identity validada por formato estrito. Nenhum texto bruto do CBS é preservado"
       ],
       "procedure": {
-        "diagnosticAction": "Associe o código exato do evento WindowsUpdateClient apenas quando o texto CBS fornecido contiver um dos marcadores Microsoft reconhecidos e uma package identity válida. O resultado conserva somente tipo do marcador e identidade do pacote.",
+        "diagnosticAction": "Associe o código exato do evento WindowsUpdateClient da execução diagnóstica atual apenas quando um CBS.log selecionado manualmente contiver um dos marcadores Microsoft reconhecidos e uma package identity válida. O resultado conserva somente tipo do marcador e identidade do pacote.",
         "correctiveAction": "Esta regra é somente diagnóstica: não fornece nem executa reparo. Confirme manualmente a atualização e encaminhe a evidência minimizada ao suporte responsável, se necessário.",
-        "requiredPrivilege": "Nenhuma elevação é necessária para analisar texto fornecido pelo chamador.",
+        "requiredPrivilege": "Nenhuma elevação é necessária para selecionar e analisar o CBS.log manualmente.",
         "requiresElevation": false,
-        "risk": "A análise é em memória, não acessa arquivos locais e não modifica o sistema.",
+        "risk": "A análise do CBS.log selecionado é somente leitura e em memória, limitada a 2 MiB, sem modificar o sistema.",
         "backup": "Não aplicável: nenhuma alteração é proposta ou executada.",
         "rollback": "Não aplicável: nenhuma alteração é proposta ou executada.",
         "sourceLimitation": "A documentação Microsoft associa 0x800F0831 a problemas de resolução de pacote/manifesto e mostra os marcadores CBS citados. Esta regra não conclui causa, não recomenda DISM/SFC e não implementa nenhuma correção.",

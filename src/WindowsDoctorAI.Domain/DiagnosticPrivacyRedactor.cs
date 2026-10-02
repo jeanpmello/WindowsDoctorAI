@@ -127,6 +127,7 @@ public static class DiagnosticPrivacyRedactor
             string.Equals(result.ScannerName, "Event Viewer", StringComparison.OrdinalIgnoreCase) ||
             (string.Equals(result.ScannerName, "Windows Update", StringComparison.OrdinalIgnoreCase) &&
              result.Title.StartsWith("Evento de falha do Windows Update", StringComparison.OrdinalIgnoreCase));
+        var sourceMetadata = DiagnosticSourceMetadata.FromEventProvider(result.SourceMetadata?.Provider);
 
         return result with
         {
@@ -138,13 +139,15 @@ public static class DiagnosticPrivacyRedactor
                 ? "Revise o evento na fonte do Windows; o texto original foi omitido por privacidade."
                 : RedactText(result.Recommendation, inventory),
             Evidence = containsRawEventMessage ? RedactEventEvidence(result.Evidence) : RedactText(result.Evidence, inventory),
-            SourceMetadata = result.SourceMetadata is null
-                ? null
-                : DiagnosticSourceMetadata.FromEventProvider(result.SourceMetadata.Provider),
+            SourceMetadata = sourceMetadata,
             CbsEvidence = result.CbsEvidence is { } cbsEvidence
                 && Enum.IsDefined(cbsEvidence.Type)
                 && CbsPackageIdentityValidator.IsValid(cbsEvidence.PackageIdentity)
                     ? cbsEvidence
+                    : null,
+            WindowsUpdateEventEvidence = sourceMetadata is not null
+                && result.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true }
+                    ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
                     : null
         };
     }
