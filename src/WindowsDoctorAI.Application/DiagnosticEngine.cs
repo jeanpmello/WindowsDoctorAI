@@ -124,11 +124,12 @@ public sealed class DiagnosticEngine : IDiagnosticEngine
         var sourceMetadata = DiagnosticSourceMetadata.FromEventProvider(result.SourceMetadata?.Provider);
         var eventEvidence = sourceMetadata is not null
             && result.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true }
-                ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
+                ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel,
+                    WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, result.WindowsUpdateEventEvidence.EventTimestamp)
                 : null;
         var cbsEvidence = result.CbsEvidence is { } cbs
             && Enum.IsDefined(cbs.Type)
-            && CbsPackageIdentityValidator.IsValid(cbs.PackageIdentity)
+            && (cbs.PackageIdentity is null || CbsPackageIdentityValidator.IsValid(cbs.PackageIdentity))
                 ? cbs
                 : null;
         return new DiagnosticResult(

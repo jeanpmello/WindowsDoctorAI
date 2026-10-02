@@ -208,6 +208,7 @@ public sealed class DiagnosticScannerPluginTests
         const string privatePath = @"C:\Users\private.user\CBS.log";
         const string privateHost = "PRIVATE-CBS-HOST-44";
         const string privateToken = "private-event-token-44";
+        var eventTimestamp = DateTimeOffset.UtcNow;
         var source = new FakeWindowsDiagnosticDataSource
         {
             WindowsUpdate = new WindowsUpdateProbe(
@@ -216,7 +217,7 @@ public sealed class DiagnosticScannerPluginTests
                 ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available(
                 [
                     new DiagnosticEvent(20, WindowsUpdateEventEvidence.OperationalChannel,
-                        "Microsoft-Windows-WindowsUpdateClient", 2, DateTimeOffset.UtcNow,
+                        "Microsoft-Windows-WindowsUpdateClient", 2, eventTimestamp,
                         $"Install failed with 0x800F0831; path={privatePath}; host={privateHost}; token={privateToken}")
                 ]))
         };
@@ -229,6 +230,7 @@ public sealed class DiagnosticScannerPluginTests
 
         Assert.Equal("WindowsUpdateClient", eventResult.SourceMetadata?.Provider);
         Assert.True(eventResult.WindowsUpdateEventEvidence?.IsExactCbsStoreCorruptionEvent);
+        Assert.Equal(eventTimestamp, eventResult.WindowsUpdateEventEvidence?.EventTimestamp);
         Assert.Equal(eventResult.WindowsUpdateEventEvidence, redacted.WindowsUpdateEventEvidence);
         var serialized = System.Text.Json.JsonSerializer.Serialize(redacted);
         Assert.DoesNotContain(privatePath, serialized, StringComparison.Ordinal);

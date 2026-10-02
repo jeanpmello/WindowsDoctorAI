@@ -120,16 +120,19 @@ public sealed class KnowledgePilotPackTests
         Assert.Contains("não fornece nem executa reparo", cbsRule.Procedure.CorrectiveAction, StringComparison.OrdinalIgnoreCase);
 
         const string packageIdentity = "Package_123_for_KB3192392~31bf3856ad364e35~amd64~~6.3.1.4";
-        var sourceText = $"Info CBS Store corruption, manifest missing for package: {packageIdentity}\n";
+        var eventTimestamp = DateTimeOffset.UtcNow;
+        var cbsTime = eventTimestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        var sourceText = $"{cbsTime}, Info CBS Store corruption, manifest missing for package: {packageIdentity}\n";
         var windowsUpdateEvent = new DiagnosticEvent(20,
             WindowsUpdateCbsLogAnalyzer.WindowsUpdateOperationalChannel,
-            "Microsoft-Windows-WindowsUpdateClient", 2, DateTimeOffset.UtcNow,
+            "Microsoft-Windows-WindowsUpdateClient", 2, eventTimestamp,
             "Update failed with HRESULT 0x800F0831.");
         var diagnostic = new WindowsUpdateCbsLogAnalyzer().Analyze(sourceText, windowsUpdateEvent);
         Assert.NotNull(diagnostic);
 
         var engine = new RecommendationEngine();
-        Assert.Single(engine.Recommend(CreateReport(diagnostic!), [cbsRule]));
+        Assert.Null(diagnostic!.CbsEvidence?.PackageIdentity);
+        Assert.Empty(engine.Recommend(CreateReport(diagnostic), [cbsRule]));
         Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update",
             "0x800F0831 CBS marker=ManifestMissing; package identity=" + packageIdentity,
             DiagnosticSourceMetadata.FromEventProvider("Microsoft-Windows-WindowsUpdateClient"))), [cbsRule]));

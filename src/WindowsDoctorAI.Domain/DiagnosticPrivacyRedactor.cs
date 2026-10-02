@@ -142,12 +142,13 @@ public static class DiagnosticPrivacyRedactor
             SourceMetadata = sourceMetadata,
             CbsEvidence = result.CbsEvidence is { } cbsEvidence
                 && Enum.IsDefined(cbsEvidence.Type)
-                && CbsPackageIdentityValidator.IsValid(cbsEvidence.PackageIdentity)
+                && (cbsEvidence.PackageIdentity is null || CbsPackageIdentityValidator.IsValid(cbsEvidence.PackageIdentity))
                     ? cbsEvidence
                     : null,
             WindowsUpdateEventEvidence = sourceMetadata is not null
                 && result.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true }
-                    ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
+                    ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel,
+                        WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, result.WindowsUpdateEventEvidence.EventTimestamp)
                     : null
         };
     }

@@ -39,8 +39,8 @@ public sealed record DiagnosticSourceMetadata(string Provider)
             : null;
 }
 
-/// <summary>Prova minimizada do canal e HRESULT observados em um evento da execução atual.</summary>
-public sealed record WindowsUpdateEventEvidence(string LogName, string ErrorCode)
+/// <summary>Metadados minimizados do evento Windows Update; o timestamp não identifica um pacote CBS.</summary>
+public sealed record WindowsUpdateEventEvidence(string LogName, string ErrorCode, DateTimeOffset? EventTimestamp = null)
 {
     public const string OperationalChannel = "Microsoft-Windows-WindowsUpdateClient/Operational";
     public const string CbsStoreCorruptionHresult = "0x800F0831";
@@ -57,8 +57,8 @@ public enum CbsEvidenceType
     FailedToResolvePackage
 }
 
-/// <summary>Únicos dados CBS dinâmicos que podem acompanhar o resultado: tipo do marcador e package identity validada.</summary>
-public sealed record CbsPackageEvidence(CbsEvidenceType Type, string PackageIdentity);
+/// <summary>Metadado CBS minimizado; package identity permanece ausente quando não há vínculo verificável.</summary>
+public sealed record CbsPackageEvidence(CbsEvidenceType Type, string? PackageIdentity = null);
 
 /// <summary>Valida package identities CBS por formato estrito, sem aceitar caminhos ou texto livre.</summary>
 public static class CbsPackageIdentityValidator

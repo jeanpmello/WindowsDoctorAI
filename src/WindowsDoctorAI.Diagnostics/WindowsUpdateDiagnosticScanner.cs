@@ -89,7 +89,8 @@ public sealed class WindowsUpdateDiagnosticScanner(IWindowsDiagnosticDataSource 
                     var currentRunEvent = provider is not null
                         && string.Equals(failure.LogName, WindowsUpdateEventEvidence.OperationalChannel, StringComparison.OrdinalIgnoreCase)
                         && ExactCbsHresult.IsMatch(failure.Message ?? string.Empty)
-                            ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
+                            ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel,
+                                WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, failure.Timestamp)
                             : null;
                     results.Add(result with
                     {

@@ -225,6 +225,8 @@ public sealed class WindowsDiagnosticDataSource(ILogger<WindowsDiagnosticDataSou
             string? message;
             try { message = record.FormatDescription(); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { message = null; }
+            // EventRecord.Id is the event type ID, not a CBS correlation key. RecordId has no counterpart in CBS;
+            // CBS correlation uses only TimeCreated metadata, never this formatted message or event XML.
             events.Add(new DiagnosticEvent(
                 record.Id,
                 logName,

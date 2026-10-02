@@ -23,7 +23,7 @@ public sealed class CbsLogImportUiTests
     [Fact]
     public async Task ImportedEvidenceIsDisplayedMinimallyButNeverAddedToHistoryOrHtml()
     {
-        var now = DateTimeOffset.Parse("2026-10-02T12:00:00Z");
+        var now = DateTimeOffset.UtcNow;
         var eventResult = new DiagnosticResult(
             "Windows Update", "Sistema", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
             "Evento de falha do Windows Update (ID 20)", "Falha de instalação 0x800F0831.",
@@ -31,7 +31,7 @@ public sealed class CbsLogImportUiTests
         {
             SourceMetadata = new DiagnosticSourceMetadata("WindowsUpdateClient"),
             WindowsUpdateEventEvidence = new WindowsUpdateEventEvidence(
-                WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
+                WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, now)
         };
         var report = new DiagnosticReport([eventResult], now, now, TimeSpan.Zero, new HealthScore(92));
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -47,7 +47,7 @@ public sealed class CbsLogImportUiTests
         var assessment = new DiagnosticAssessmentService(
             knowledge, new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
         var viewModelLogger = new CapturingLogger<HomeViewModel>();
-        var cbsText = $"Info CBS Store corruption, manifest missing for package: {ValidPackage}\r\n"
+        var cbsText = $"{now.ToLocalTime():yyyy-MM-dd HH:mm:ss}, Info CBS Store corruption, manifest missing for package: {ValidPackage}\r\n"
             + $"Private {PrivatePath}; host={PrivateHost}; token={PrivateToken}\r\n";
         var picker = new TestCbsLogPicker(Encoding.UTF8.GetBytes(cbsText));
         var viewModel = new HomeViewModel(

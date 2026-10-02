@@ -5,7 +5,7 @@ using WindowsDoctorAI.Domain;
 
 namespace WindowsDoctorAI.Application;
 
-public enum CbsLogImportStatus
+internal enum CbsLogImportStatus
 {
     Cancelled,
     FileReadFailed,
@@ -17,14 +17,15 @@ public enum CbsLogImportStatus
 }
 
 /// <summary>Saída transitória: contém apenas estado ou resultado tipado, nunca arquivo, caminho ou texto bruto.</summary>
-public sealed record CbsLogImportOutcome(CbsLogImportStatus Status, DiagnosticResult? Result = null);
+internal sealed record CbsLogImportOutcome(CbsLogImportStatus Status, DiagnosticResult? Result = null);
 
 /// <summary>Coordena seleção e análise limitada de CBS.log sem gravar conteúdo ou registrar exceções.</summary>
-public sealed class CbsLogImportService(
+internal sealed class CbsLogImportService(
     ICbsLogFilePicker filePicker,
     IWindowsUpdateCbsLogAnalyzer analyzer)
 {
     public const int MaximumFileBytes = 2 * 1024 * 1024;
+    private static readonly TimeSpan MaximumRunAge = TimeSpan.FromMinutes(15);
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly UnicodeEncoding StrictUtf16LittleEndian = new(false, true, true);
@@ -94,6 +95,8 @@ public sealed class CbsLogImportService(
 
     private static WindowsUpdateEventEvidence? FindCurrentRunEvent(DiagnosticRun? run)
     {
+        if (!IsFreshWellFormedRun(run)) return null;
+
         var result = run?.Report?.Results.FirstOrDefault(candidate =>
             candidate.Status == DiagnosticStatus.Finding
             && string.Equals(candidate.ScannerName, "Windows Update", StringComparison.OrdinalIgnoreCase)
@@ -101,9 +104,22 @@ public sealed class CbsLogImportService(
                 == DiagnosticSourceMetadata.WindowsUpdateClientProvider
             && candidate.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true });
 
-        return result?.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true }
-            ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult)
+        return result?.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true, EventTimestamp: not null } evidence
+            ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel,
+                WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, evidence.EventTimestamp)
             : null;
+    }
+
+    private static bool IsFreshWellFormedRun(DiagnosticRun? run)
+    {
+        if (run is null || run.Id == Guid.Empty || run.Report is not { } report) return false;
+        var now = DateTimeOffset.UtcNow;
+        return run.StartedAtUtc <= run.CompletedAtUtc
+            && run.CompletedAtUtc <= now.AddMinutes(1)
+            && now - run.CompletedAtUtc <= MaximumRunAge
+            && report.StartedAtUtc <= report.CompletedAtUtc
+            && report.StartedAtUtc >= run.StartedAtUtc.AddMinutes(-1)
+            && report.CompletedAtUtc <= run.CompletedAtUtc.AddMinutes(1);
     }
 
     private static bool TryDecode(ReadOnlySpan<byte> bytes, out string text)

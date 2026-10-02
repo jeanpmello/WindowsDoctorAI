@@ -9,7 +9,7 @@ using WindowsDoctorAI.Domain;
 namespace WindowsDoctorAI.App;
 
 /// <summary>Apresenta resumo real do engine e preserva os campos de inventário do Milestone 1.</summary>
-public partial class HomeViewModel(
+internal partial class HomeViewModel(
     RunComputerInventoryDiagnosticUseCase runDiagnostic,
     IDiagnosticRunRepository history,
     IKnowledgeRepository knowledgeRepository,
@@ -244,7 +244,7 @@ public partial class HomeViewModel(
                     ResetCbsLogAnalysis("A execução diagnóstica atual não contém o evento operacional WindowsUpdateClient com 0x800F0831; nenhum achado foi produzido.");
                     break;
                 case CbsLogImportStatus.NoRecognizedEvidence:
-                    ResetCbsLogAnalysis("Não foi reconhecido um marcador CBS com package identity válida; nenhum achado foi produzido.");
+                    ResetCbsLogAnalysis("Não foi reconhecido um marcador CBS com timestamp no mesmo segundo local do evento; nenhum achado foi produzido.");
                     break;
                 case CbsLogImportStatus.Finding when outcome.Result?.CbsEvidence is { } cbsEvidence:
                     CbsLogAnalysisStatus = "Evidência reconhecida em memória. O texto original não foi retido.";
@@ -283,7 +283,7 @@ public partial class HomeViewModel(
             _currentRunWasExecutedThisSession = true;
             UpdateCbsLogCommandState();
             CbsLogAnalysisStatus = CbsLogImportService.HasCurrentRunEvent(outcome.Run)
-                ? "A execução atual contém o evento necessário; selecione um CBS.log para correlacionar a evidência."
+                ? "A execução atual contém o evento necessário; o filtro de mesmo segundo local não prova que CBS e evento sejam da mesma atualização."
                 : "A execução atual não contém o evento operacional WindowsUpdateClient com 0x800F0831; não haverá recomendação CBS.";
             CanExportHtmlReport = true;
             DisplayInventory(outcome.Run.Inventory);
