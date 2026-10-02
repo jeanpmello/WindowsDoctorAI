@@ -16,6 +16,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
     private const int MaximumConditionItems = 10;
     private static readonly Regex SafeIdentifier = new(@"\A[A-Za-z0-9._-]{1,80}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex SafeErrorCode = new(@"\A0x[0-9a-fA-F]{8}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex CbsStoreCorruptionCode = new(@"(?<![A-Za-z0-9_])0x800F0831(?![A-Za-z0-9_])", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> GenericScannerNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "*", "all", "any", "unknown", "none", "system"
@@ -86,10 +87,11 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
 
     private static void Validate(KnowledgePackage package)
     {
-        var strictSchema = package.SchemaVersion is "1.1" or "1.2";
-        var structuredSourceSchema = package.SchemaVersion == "1.2";
+        var strictSchema = package.SchemaVersion is "1.1" or "1.2" or "1.3";
+        var structuredSourceSchema = package.SchemaVersion is "1.2" or "1.3";
+        var structuredEvidenceSchema = package.SchemaVersion == "1.3";
         if (!strictSchema && package.SchemaVersion != "1.0")
-            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0', '1.1' ou '1.2'.");
+            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0', '1.1', '1.2' ou '1.3'.");
         ValidateText(package.Version, "version", 40);
         if (!Regex.IsMatch(package.Version, @"\A[A-Za-z0-9._-]{1,40}\z", RegexOptions.CultureInvariant))
             throw new InvalidDataException("version deve conter apenas letras, números, ponto, hífen ou sublinhado.");
@@ -111,6 +113,8 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             ValidateList(rule.Symptoms, "symptoms", rule.Id, 50, 300);
             ValidateList(rule.Causes, "causes", rule.Id, 50, 1000);
             ValidateList(rule.Solutions, "solutions", rule.Id, 50, 1000);
+            if (rule.Match is null && rule.ErrorCodes.Concat(rule.Symptoms).Any(value => CbsStoreCorruptionCode.IsMatch(value)))
+                throw new InvalidDataException("0x800F0831 não pode usar correspondência legada por código/sintoma; exige evidência CBS tipada no schema 1.3.");
             if (rule.References is null || rule.References.Count is 0 or > 50)
                 throw new InvalidDataException($"A regra {rule.Id} deve ter entre 1 e 50 referências declaradas.");
             foreach (var reference in rule.References)
@@ -123,13 +127,13 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             }
 
             if (strictSchema)
-                ValidateStrictRule(rule, structuredSourceSchema);
+                ValidateStrictRule(rule, structuredSourceSchema, structuredEvidenceSchema);
             else if (rule.Applicability is not null || rule.Match is not null || rule.RequiredEvidence is not null || rule.Procedure is not null)
                 throw new InvalidDataException($"A regra {rule.Id} usa campos do schema 1.1, mas o pacote declara 1.0.");
         }
     }
 
-    private static void ValidateStrictRule(KnowledgeRule rule, bool structuredSourceSchema)
+    private static void ValidateStrictRule(KnowledgeRule rule, bool structuredSourceSchema, bool structuredEvidenceSchema)
     {
         ValidateText(rule.Applicability, $"applicability ({rule.Id})", 600);
         if (rule.Match is null)
@@ -140,6 +144,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         ValidateRequiredConditions(rule.Match.ScannerNames, "match.scannerNames", rule.Id, 80);
         var contextTerms = rule.Match.RequiredContextTerms ?? Array.Empty<string>();
         var sourceProviders = rule.Match.RequiredSourceProviders ?? Array.Empty<string>();
+        var evidenceTypes = rule.Match.RequiredEvidenceTypes ?? Array.Empty<string>();
         if (contextTerms.Count > 0)
             ValidateRequiredConditions(contextTerms, "match.requiredContextTerms", rule.Id, 120);
         if (sourceProviders.Count > 0)
@@ -151,8 +156,17 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
                     DiagnosticSourceMetadata.NormalizeProvider(provider), provider, StringComparison.Ordinal)))
                 throw new InvalidDataException($"A regra {rule.Id} declara provider de origem desconhecido ou não canônico.");
         }
-        if (contextTerms.Count == 0 && sourceProviders.Count == 0)
-            throw new InvalidDataException($"A regra {rule.Id} precisa declarar contexto textual ou provider estruturado específico.");
+        if (evidenceTypes.Count > 0)
+        {
+            if (!structuredEvidenceSchema)
+                throw new InvalidDataException($"A regra {rule.Id} usa tipos de evidência estruturada, disponíveis somente no schema 1.3.");
+            ValidateRequiredConditions(evidenceTypes, "match.requiredEvidenceTypes", rule.Id, 80);
+            var knownEvidenceTypes = Enum.GetNames<CbsEvidenceType>();
+            if (evidenceTypes.Any(value => !knownEvidenceTypes.Contains(value, StringComparer.Ordinal)))
+                throw new InvalidDataException($"A regra {rule.Id} declara tipo de evidência estruturada desconhecido.");
+        }
+        if (contextTerms.Count == 0 && sourceProviders.Count == 0 && evidenceTypes.Count == 0)
+            throw new InvalidDataException($"A regra {rule.Id} precisa declarar contexto textual, provider estruturado ou tipo de evidência específico.");
         if (rule.Match.ScannerNames.Any(value => GenericScannerNames.Contains(value))
             || contextTerms.Any(value => GenericContextTerms.Contains(value)))
             throw new InvalidDataException($"A regra {rule.Id} usa uma condição genérica; indique scanner e contexto específicos.");
@@ -180,6 +194,16 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             && (!rule.Procedure.IsModifying || !rule.Procedure.RequiresElevation
             || !rule.Procedure.Rollback.Contains("indisponível", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("A regra 0x80073712 precisa permanecer privilegiada, modificadora e sem rollback disponível.");
+
+        if (string.Equals(rule.Match.ExactErrorCode, "0x800F0831", StringComparison.OrdinalIgnoreCase)
+            && (!structuredEvidenceSchema
+                || evidenceTypes.Count == 0
+                || !sourceProviders.Contains(DiagnosticSourceMetadata.WindowsUpdateClientProvider, StringComparer.Ordinal)
+                || !rule.Match.ScannerNames.Contains("Windows Update", StringComparer.Ordinal)
+                || !contextTerms.Contains("CBS marker=", StringComparer.Ordinal)
+                || rule.Procedure.IsModifying
+                || rule.Procedure.RequiresElevation))
+            throw new InvalidDataException("A regra 0x800F0831 exige evidência CBS tipada no schema 1.3, provider WindowsUpdateClient e orientação somente diagnóstica.");
     }
 
     private static void ValidateRequiredConditions(IReadOnlyList<string>? values, string field, string ruleId, int maximumLength)

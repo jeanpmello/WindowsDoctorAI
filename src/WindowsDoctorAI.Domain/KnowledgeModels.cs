@@ -29,6 +29,9 @@ public sealed record KnowledgeMatchCondition(
 {
     /// <summary>Providers canônicos requeridos na origem estruturada do achado, nunca no texto livre.</summary>
     public IReadOnlyList<string> RequiredSourceProviders { get; init; } = Array.Empty<string>();
+
+    /// <summary>Tipos de evidência estruturada exigidos; quando há vários, qualquer um deles satisfaz a condição.</summary>
+    public IReadOnlyList<string> RequiredEvidenceTypes { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>Orientação declarativa; nunca é executada pela aplicação.</summary>

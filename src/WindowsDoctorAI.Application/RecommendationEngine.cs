@@ -26,9 +26,19 @@ public sealed class RecommendationEngine
                     var sourceProvider = finding.SourceMetadata is { } sourceMetadata
                         ? DiagnosticSourceMetadata.NormalizeProvider(sourceMetadata.Provider)
                         : null;
+                    var requiredEvidenceTypes = strictMatch.RequiredEvidenceTypes ?? Array.Empty<string>();
+                    var evidenceTypeMatches = requiredEvidenceTypes.Count == 0
+                        || finding.CbsEvidence is { } cbsEvidence
+                        && Enum.IsDefined(cbsEvidence.Type)
+                        && CbsPackageIdentityValidator.IsValid(cbsEvidence.PackageIdentity)
+                        && requiredEvidenceTypes.Contains(cbsEvidence.Type.ToString(), StringComparer.Ordinal)
+                        && string.Equals(finding.Evidence,
+                            $"CBS marker={cbsEvidence.Type}; package identity={cbsEvidence.PackageIdentity}",
+                            StringComparison.Ordinal);
                     if (!strictMatch.ScannerNames.Contains(finding.ScannerName, StringComparer.OrdinalIgnoreCase)
                         || !strictMatch.RequiredContextTerms.All(term => ContainsPhrase(searchable, term))
                         || !strictMatch.RequiredSourceProviders.All(provider => string.Equals(sourceProvider, provider, StringComparison.OrdinalIgnoreCase))
+                        || !evidenceTypeMatches
                         || !ContainsToken(searchable, strictMatch.ExactErrorCode))
                         continue;
                     matches.Add((finding, strictMatch.ExactErrorCode, true));

@@ -140,7 +140,12 @@ public static class DiagnosticPrivacyRedactor
             Evidence = containsRawEventMessage ? RedactEventEvidence(result.Evidence) : RedactText(result.Evidence, inventory),
             SourceMetadata = result.SourceMetadata is null
                 ? null
-                : DiagnosticSourceMetadata.FromEventProvider(result.SourceMetadata.Provider)
+                : DiagnosticSourceMetadata.FromEventProvider(result.SourceMetadata.Provider),
+            CbsEvidence = result.CbsEvidence is { } cbsEvidence
+                && Enum.IsDefined(cbsEvidence.Type)
+                && CbsPackageIdentityValidator.IsValid(cbsEvidence.PackageIdentity)
+                    ? cbsEvidence
+                    : null
         };
     }
 
