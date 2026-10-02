@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>WindowsDoctorAI.Database</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WindowsDoctorAI.Core/WindowsDoctorAI.Core.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Domain/WindowsDoctorAI.Domain.csproj" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+  </ItemGroup>
+</Project>

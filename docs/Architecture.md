@@ -1,84 +1,56 @@
 # Arquitetura
 
-**Estado:** proposta de arquitetura. Esta descrição não indica que projetos, interfaces ou módulos já estejam implementados.
+**Estado:** solução do Milestone 1 implementada. O build e a execução da UI e da coleta WMI ainda devem ser validados em Windows; esta documentação não representa auditoria ou certificação.
 
 ## Visão geral
 
-Windows Doctor AI é planejado como uma aplicação local Windows construída com C#, .NET 9, WinUI 3 e SQLite, organizada segundo Clean Architecture. O desenho separa interface, regras de domínio e casos de uso, mecanismos do sistema operacional e persistência. As dependências devem apontar para abstrações estáveis do Core; regras centrais não devem depender de WinUI, SQLite ou provedores de IA.
-
-### Estrutura de diretórios proposta
-
-A estrutura a seguir registra os diretórios/projetos previstos. `tests/` é apenas o diretório raiz de testes planejado; os projetos de teste ainda não foram especificados.
+Windows Doctor AI é uma aplicação desktop WinUI 3, C#/.NET 9, organizada em Clean Architecture. O domínio descreve inventário e execução; contratos internos isolam scanner, preferências e histórico; o caso de uso coordena a coleta; adaptadores implementam WMI e SQLite; a aplicação WinUI compõe o grafo DI e apresenta os dados.
 
 ```text
-WindowsDoctorAI/
+WindowsDoctorAI.sln
 ├── src/
-│   ├── WindowsDoctorAI.App/
-│   ├── WindowsDoctorAI.Core/
-│   ├── WindowsDoctorAI.Diagnostics/
-│   ├── WindowsDoctorAI.Repair/
-│   ├── WindowsDoctorAI.AI/
-│   └── WindowsDoctorAI.Database/
-└── tests/
+│   ├── WindowsDoctorAI.App/             # WinUI 3, MVVM, rotas, DI e logging
+│   ├── WindowsDoctorAI.Core/            # Portas independentes dos adaptadores
+│   ├── WindowsDoctorAI.Domain/          # Modelos e invariantes
+│   ├── WindowsDoctorAI.Application/     # Caso de uso de diagnóstico
+│   ├── WindowsDoctorAI.Infrastructure/ # Composição do adaptador SQLite
+│   ├── WindowsDoctorAI.Diagnostics/    # Scanner e fonte WMI Windows
+│   ├── WindowsDoctorAI.Repair/          # Contrato vazio de catálogo; sem executor
+│   ├── WindowsDoctorAI.AI/              # Contrato opcional; sem provedor
+│   ├── WindowsDoctorAI.Reporting/       # Formatador de inventário em texto
+│   └── WindowsDoctorAI.Database/        # DbContext EF Core e repositórios SQLite
+└── tests/WindowsDoctorAI.Tests/         # xUnit e testes SQLite em memória
 ```
-
-## Camadas e módulos
-
-### `WindowsDoctorAI.App` — apresentação e composição
-
-Aplicação WinUI 3 planejada: dashboard, fluxo de execução de diagnósticos, visualização de resultados, solicitação de consentimento para reparos e composição de dependências. A camada de apresentação não deverá conter regras de diagnóstico nem executar comandos diretamente.
-
-### `WindowsDoctorAI.Core` — domínio e casos de uso
-
-Núcleo de regras e contratos: conceitos de diagnóstico, achado, severidade, proposta de reparo, autorização, interfaces de scanner/repositório e coordenação dos casos de uso. Deve permanecer independente das tecnologias de UI e de armazenamento.
-
-### `WindowsDoctorAI.Diagnostics` — Diagnostic Engine
-
-Implementações de verificações locais para Windows e hardware, chamadas por casos de uso do Core. Cada verificação deverá declarar escopo, evidência, requisitos de privilégio e erros possíveis. Uma leitura indisponível ou uma falha de scanner não pode ser interpretada como ausência de problema.
-
-### `WindowsDoctorAI.Repair` — Repair Engine
-
-Catálogo e execução de correções aprovadas. Deve validar pré-condições, explicar o efeito, usar apenas o privilégio necessário, registrar o resultado e oferecer reversão quando ela for tecnicamente suportada. O módulo não deve receber instruções executáveis livres geradas por IA.
-
-### `WindowsDoctorAI.AI` — AI Engine
-
-Abstração de provedores e integração opcional para resumir ou contextualizar evidências. Deve aceitar dados minimizados, tratar saídas como conteúdo não confiável e retornar recomendações estruturadas. Não deve poder invocar o Repair Engine sem passar pelo fluxo de consentimento definido no Core.
-
-### `WindowsDoctorAI.Database` — persistência
-
-Implementação SQLite de repositórios e migrações para execuções, achados, propostas e histórico. O Core define os contratos; o banco não define regras de domínio. Consulte [Database](Database.md).
 
 ## Direção de dependências
 
-- `WindowsDoctorAI.Core` não depende dos demais módulos de produto.
-- `WindowsDoctorAI.App`, `Diagnostics`, `Repair`, `AI` e `Database` podem depender de contratos do Core.
-- A aplicação compõe implementações concretas; o Core coordena operações por interfaces.
-- Chamadas entre diagnóstico, IA, banco e reparo devem passar por casos de uso/contratos, e não por dependências circulares.
-- Detalhes de Windows e SQLite ficam fora do domínio central.
+- `Domain` não depende de infraestrutura ou UI.
+- `Core` referencia os tipos de domínio usados nas portas; não referencia UI, WMI, EF Core ou APIs externas.
+- `Application` depende de `Core` e `Domain`, não de WinUI nem de banco concreto.
+- `Diagnostics` implementa o contrato de scanner; a consulta ao WMI é um adaptador Windows substituível por fonte simulada.
+- `Database` implementa os repositórios com EF Core/SQLite. `Infrastructure` expõe o registro das implementações para a composição.
+- `App` é o composition root; configura Hosting, Configuration, Logging, DI, rotas e páginas WinUI.
+- `AI`, `Repair` e `Reporting` permanecem separados. O milestone não registra serviço externo de IA nem executor de reparo.
 
-Esta orientação deverá ser refinada ao definir a solução .NET; não antecipa projetos auxiliares ou subprojetos de teste.
+## Fluxo de diagnóstico implementado
 
-## Fluxos principais propostos
+1. O usuário inicia a ação **Iniciar Diagnóstico**.
+2. `RunComputerInventoryDiagnosticUseCase` solicita `IComputerInventoryScanner` e cria uma execução com score demonstrativo fixo em 95.
+3. `ComputerInventoryScanner` delega a `IComputerInventoryDataSource`; no Windows, `WindowsManagementInventoryDataSource` usa WMI, APIs de rede, tipo de firmware e registro local para ler os campos suportados.
+4. As informações são exibidas no dashboard. Se a opção de histórico estiver habilitada, a execução é serializada em JSON e gravada em `DiagnosticRuns`, no SQLite local.
+5. Falhas ao persistir são reportadas sem descartar o resultado já coletado; falhas individuais WMI são registradas com o nome da consulta e deixam o campo correspondente indisponível.
 
-### Diagnóstico
+A coleta não executa correções. Campos podem estar ausentes conforme firmware, hardware, versão do Windows e permissões. O score não é calculado a partir de achados e não deve ser interpretado como diagnóstico de saúde.
 
-1. A aplicação explica e inicia um caso de uso do Core.
-2. O Core solicita verificações habilitadas aos scanners de Diagnostics.
-3. Os resultados são normalizados em achados; falhas e limitações permanecem explícitas.
-4. O Database persiste execução e achados, e a aplicação apresenta evidências e score versionado.
-5. Se houver uso de IA configurado, o fluxo solicita consentimento e envia somente dados necessários ao AI Engine; a resposta é exibida como apoio, não como comando.
+## Persistência e configuração
 
-### Reparo
+O arquivo do banco fica em `%LOCALAPPDATA%\WindowsDoctorAI\windowsdoctorai.db`. O schema inicial é criado com `EnsureCreated`; migrações versionadas ainda não existem. A configuração JSON e variáveis de ambiente `WINDOWSDOCTORAI_` são carregadas no App; logs são enviados ao provider Debug. O diretório e as tabelas estão descritos em [Database](Database.md).
 
-1. A aplicação apresenta uma proposta e seus efeitos conhecidos.
-2. O Core verifica aprovação explícita, pré-condições e privilégios.
-3. O Repair Engine executa a ação catalogada; o Database registra estados e resultado.
-4. A aplicação informa sucesso, falha parcial ou reversão disponível sem transformar falha em êxito.
+## Limites e próximo trabalho
 
-## Plugin System
-
-A arquitetura prevê extensão controlada de verificações e conteúdo. A interface de plugin, manifesto, origem confiável, compatibilidade, atualização e isolamento ainda precisam ser especificados. A primeira versão não deverá carregar código arbitrário só porque está em um diretório de plugins. Plugins de reparo exigem controles de confiança e o mesmo fluxo de aprovação das ações nativas.
-
-## Tecnologias e decisão pendente
-
-A baseline recebida para documentação é C#, .NET 9, WinUI 3, SQLite e Clean Architecture. A [política oficial de suporte do .NET](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core), atualizada em 8 de setembro de 2026, informa que o .NET 9 entra em fim de suporte em **10 de novembro de 2026**. Portanto, a versão exata do framework deve ser reavaliada e confirmada antes de criar a solução e antes de qualquer lançamento; este registro preserva a intenção atual sem declarar .NET 9 como alvo seguro de longo prazo.
+- Executar build, abrir as telas e validar consultas WMI em uma máquina Windows representativa.
+- Criar migrações EF Core antes de evolução compatível do schema.
+- Substituir score demonstrativo por metodologia explicável e versionada.
+- Projetar regras de retenção e remoção do histórico; a opção atual apenas impede novas gravações.
+- Definir matriz de Windows/hardware e avaliar o ciclo de suporte do .NET 9 antes de produção.
+- Introduzir IA, plugins e correções somente após requisitos, consentimento e controles próprios.

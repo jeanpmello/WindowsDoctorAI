@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>WindowsDoctorAI.Application</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WindowsDoctorAI.Core/WindowsDoctorAI.Core.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Domain/WindowsDoctorAI.Domain.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+  </ItemGroup>
+</Project>

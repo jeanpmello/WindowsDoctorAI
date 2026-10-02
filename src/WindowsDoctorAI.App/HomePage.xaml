@@ -1,0 +1,115 @@
+<Page
+    x:Class="WindowsDoctorAI.App.HomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Loaded="Page_Loaded">
+    <Page.Resources>
+        <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Style>
+        <Style x:Key="FieldValueStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="IsTextSelectionEnabled" Value="True" />
+        </Style>
+        <Style x:Key="InventoryCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="20" />
+        </Style>
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Padding="30,26,30,36" Spacing="20">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Windows Doctor AI" FontSize="30" FontWeight="SemiBold" />
+                <TextBlock Text="Visão geral e inventário deste computador" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+
+            <Grid ColumnDefinitions="2*,*" ColumnSpacing="16">
+                <Border Style="{StaticResource InventoryCardStyle}">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
+                        <StackPanel Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="Diagnóstico do computador" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock Text="A coleta é local e somente de leitura. Nenhum reparo será aplicado." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
+                                <Button Content="Iniciar Diagnóstico" Command="{Binding StartDiagnosticCommand}" Style="{StaticResource AccentButtonStyle}" />
+                                <ProgressRing IsActive="{Binding IsScanning}" Width="24" Height="24" />
+                            </StackPanel>
+                            <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" MinWidth="128" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
+                            <TextBlock Text="{Binding HealthScore}" FontSize="56" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            <TextBlock Text="Health Score" HorizontalAlignment="Center" FontWeight="SemiBold" />
+                            <TextBlock Text="Valor demonstrativo" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="8" VerticalAlignment="Center">
+                        <TextBlock Text="Último diagnóstico" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="{Binding LastDiagnosticText}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <TextBlock Text="Informações do computador" Style="{StaticResource SectionTitleStyle}" />
+            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="16">
+                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Computador" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="Nome" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding ComputerName}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Fabricante e modelo" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding ManufacturerModel}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Número de série" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding SerialNumber}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Usuário e domínio" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding UserAndDomain}" Style="{StaticResource FieldValueStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Sistema operacional" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="Windows e build" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding OperatingSystem}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Tempo desde a inicialização" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Uptime}" Style="{StaticResource FieldValueStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Processador e memória" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="CPU e núcleos" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Processor}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="RAM instalada" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Memory}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="GPU" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Graphics}" Style="{StaticResource FieldValueStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Armazenamento" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="Volumes e discos locais" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Disks}" Style="{StaticResource FieldValueStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Firmware e segurança" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="BIOS" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Bios}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Modo de firmware" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Firmware}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="TPM" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding Tpm}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Secure Boot" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding SecureBoot}" Style="{StaticResource FieldValueStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Rede" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="IPv4" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding IPv4}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="IPv6" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding IPv6}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Adaptadores" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding NetworkAdapters}" Style="{StaticResource FieldValueStyle}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

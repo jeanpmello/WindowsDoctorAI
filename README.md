@@ -1,62 +1,76 @@
 # Windows Doctor AI
 
-**Windows Doctor AI** é a proposta de uma plataforma de diagnóstico, análise e correção assistida para computadores Windows, voltada a técnicos, empresas e equipes de infraestrutura.
+Aplicativo desktop Windows para inventário local e diagnóstico assistido. **Milestone 1 implementa a solution, o dashboard WinUI 3 e o scanner de inventário**; a execução visual e a coleta em hardware Windows ainda precisam de validação em uma máquina Windows.
 
-> **Estado do repositório:** planejamento e documentação. O produto ainda não tem código funcional; funcionalidades, arquitetura e etapas abaixo são propostas, não capacidades já entregues.
+## O que está incluído
 
-## Objetivo
+- Solution .NET 9 em Clean Architecture, com projetos independentes em `src/` e testes em `tests/`.
+- Aplicativo WinUI 3 com navegação lateral e telas **Inicial**, **Sobre** e **Configurações**.
+- ViewModels com CommunityToolkit.Mvvm, composição por Dependency Injection, configuração JSON, logging e armazenamento local SQLite via Entity Framework Core.
+- Botão **Iniciar Diagnóstico** e scanner `ComputerInventoryScanner`, que solicita inventário local de fabricante, modelo, número de série, Windows/build/uptime, CPU/núcleos, RAM, GPUs, volumes, BIOS, firmware UEFI/BIOS, estado do Secure Boot, TPM, usuário/domínio, adaptadores e endereços IPv4/IPv6.
+- Recuperação e gravação opcional do último resultado no histórico SQLite. A preferência de histórico pode ser desligada em **Configurações**.
+- Health Score temporário fixo em **95**; não é uma avaliação de saúde real.
+- Coleta somente de leitura: esta versão não executa correções, não ativa provedor de IA e não envia o inventário a serviços remotos.
 
-Ajudar equipes de suporte a identificar problemas de saúde do Windows, entender evidências e escolher correções com segurança. O produto deve transformar sinais dispersos do sistema em diagnósticos compreensíveis e rastreáveis, sem deixar que recomendações automatizadas alterem o computador sem autorização humana.
+Dados indisponíveis, não suportados pelo firmware ou bloqueados pelo sistema são apresentados como indisponíveis; isso não equivale a um resultado saudável. Consultas WMI e algumas propriedades variam de acordo com edição do Windows, hardware, firmware e permissões do usuário.
 
-## Sistemas operacionais planejados
+## Estrutura
 
-- Windows 10
-- Windows 11
-- Windows Server
+```text
+WindowsDoctorAI.sln
+├── src/
+│   ├── WindowsDoctorAI.App/            # WinUI 3, MVVM, navegação e composição
+│   ├── WindowsDoctorAI.Core/           # Portas e contratos
+│   ├── WindowsDoctorAI.Domain/         # Inventário, execução e preferências
+│   ├── WindowsDoctorAI.Application/    # Caso de uso de diagnóstico
+│   ├── WindowsDoctorAI.Infrastructure/# Registro de adaptadores externos
+│   ├── WindowsDoctorAI.Diagnostics/    # ComputerInventoryScanner e WMI Windows
+│   ├── WindowsDoctorAI.Repair/         # Contratos; sem executores de reparo
+│   ├── WindowsDoctorAI.AI/             # Contrato opcional; sem provedor remoto
+│   ├── WindowsDoctorAI.Reporting/      # Formatação de inventário
+│   └── WindowsDoctorAI.Database/       # EF Core, SQLite e repositórios
+└── tests/
+    └── WindowsDoctorAI.Tests/          # Testes unitários e integração SQLite
+```
 
-A lista expressa o escopo pretendido, não uma garantia de compatibilidade. Edições, versões, builds, arquiteturas, requisitos mínimos e ciclos de suporte deverão ser especificados e testados antes de cada versão.
+Consulte [PROJECT_RULES.md](PROJECT_RULES.md), [CONTRIBUTING.md](CONTRIBUTING.md) e a documentação em [`docs/`](docs/).
 
-## Funcionalidades planejadas
+## Pré-requisitos
 
-- **Diagnóstico local:** coleta controlada de informações de saúde do sistema e do hardware.
-- **Análise explicável:** achados com evidências, gravidade, nível de confiança e recomendações compreensíveis.
-- **Health Score:** visão resumida, acompanhada da metodologia e dos fatores que influenciam a pontuação.
-- **Correções assistidas:** catálogo de ações, avaliação de impacto, consentimento por ação e registro do resultado.
-- **Histórico e relatórios:** consulta a diagnósticos anteriores e exportação com minimização de dados identificáveis.
-- **Base de conhecimento e plugins:** extensão de verificações e orientações sob controles de confiança.
-- **IA opcional:** apoio à interpretação de resultados, sujeito a configuração, minimização de dados e aprovação do usuário.
+- Windows 10 (build mínimo de plataforma `10.0.17763.0`) ou Windows 11 para executar o aplicativo e realizar a coleta WMI.
+- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) e conexão à internet na primeira restauração dos pacotes NuGet.
+- Visual Studio 2022 atualizado com ferramentas para desenvolvimento desktop .NET recomendadas para WinUI 3 (alternativamente, SDK .NET e Windows App SDK restaurados via NuGet).
 
-## Tecnologias planejadas
+A solution foi solicitada em .NET 9. **A política da Microsoft informa fim de suporte do .NET 9 em 10 de novembro de 2026**; o alvo deverá ser reavaliado antes de uma versão de produção.
 
-- C# e .NET 9
-- WinUI 3
-- SQLite para armazenamento local
-- Clean Architecture
-- Módulos de diagnóstico, reparo, IA e plugins
+## Compilar e executar no Windows
 
-**Atenção ao ciclo de suporte:** a [política oficial da Microsoft](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core) indica fim de suporte do .NET 9 em **10 de novembro de 2026**. Como essa data está próxima, a versão-alvo deve ser confirmada antes da implementação e de qualquer lançamento; este documento registra .NET 9 como tecnologia planejada, não como decisão imutável para produção.
+Na raiz do repositório, em PowerShell ou Developer Command Prompt:
 
-## Roadmap
+```powershell
+dotnet restore .\WindowsDoctorAI.sln
+dotnet build .\WindowsDoctorAI.sln --configuration Release
+dotnet test .\tests\WindowsDoctorAI.Tests\WindowsDoctorAI.Tests.csproj --configuration Release
+dotnet run --project .\src\WindowsDoctorAI.App\WindowsDoctorAI.App.csproj --configuration Release
+```
 
-- **Alpha 0.1:** fundação da solução, Core Engine, SQLite e dashboard inicial.
-- **Alpha 0.2:** scanner do Windows e do hardware, com Health Score.
-- **Beta:** correções automáticas sob aprovação, relatórios e base de conhecimento.
-- **1.0:** assistência de IA e recursos para empresas.
+Ao abrir, selecione **Iniciar Diagnóstico** na tela Inicial. O app cria o banco `windowsdoctorai.db` em `%LOCALAPPDATA%\WindowsDoctorAI\`. O schema inicial é criado com `EnsureCreated`; migrações versionadas ainda não foram introduzidas.
 
-Consulte [docs/Roadmap.md](docs/Roadmap.md) para escopo e critérios propostos por etapa.
+## Testes
 
-## Modelo freemium — proposta
+A suite não exige um computador físico Windows: testa score, cancelamento e delegação do scanner com uma fonte simulada, coordenação do caso de uso, política de histórico e repositórios EF Core/SQLite em memória.
 
-A hipótese de produto prevê um núcleo gratuito para uso individual e recursos pagos destinados a empresas, como administração em escala, políticas centralizadas, integrações e suporte organizacional. Preços, limites, licenciamento, tratamento de dados e disponibilidade dos planos **não estão definidos**; esta descrição não é uma oferta comercial.
+```powershell
+dotnet test .\tests\WindowsDoctorAI.Tests\WindowsDoctorAI.Tests.csproj --configuration Release
+```
 
-## Segurança e privacidade
+Isso não substitui validação do build XAML, da navegação, nem testes de integração WMI em Windows. No Linux, `dotnet test` da suite funciona; a compilação WinUI depende do compilador XAML Windows (`XamlCompiler.exe`) e não pode ser concluída nesse sistema.
 
-A ferramenta deverá privilegiar diagnósticos somente de leitura e executar correções apenas após consentimento explícito, apresentando o efeito esperado e registrando o resultado. Elevação de privilégios deve ser pontual e justificada. O uso de IA deve ser opcional, com divulgação do que será enviado e sem transmissão de dados por padrão. Consulte [docs/Security.md](docs/Security.md) e [docs/Database.md](docs/Database.md).
+## Persistência e privacidade
 
-## Contribuição
-
-Leia [CONTRIBUTING.md](CONTRIBUTING.md) antes de propor alterações. Requisitos e decisões de projeto estão em [`docs/`](docs/).
+O histórico é ligado por padrão e armazena localmente o inventário da execução, que pode conter identificadores como nome/série do equipamento, usuário e IP. Desative **Salvar diagnósticos no histórico local** para evitar novas gravações. Essa opção não apaga resultados já salvos; remoção de histórico não faz parte deste milestone. SQLite não implica criptografia em repouso. Consulte [docs/Database.md](docs/Database.md) e [docs/Security.md](docs/Security.md).
 
 ## Licença
 
-Este projeto está sob a licença MIT; consulte [LICENSE](LICENSE).
+[MIT](LICENSE).
+- Botão **Iniciar Diagnóstico** e scanner `ComputerInventoryScanner`, que solicita inventário local de fabricante, modelo, número de série, Windows/build/uptime, CPU/núcleos, RAM, GPUs, modelos de discos físicos e volumes, BIOS, firmware UEFI/BIOS, estado do Secure Boot, TPM, usuário/domínio, adaptadores e endereços IPv4/IPv6.

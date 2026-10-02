@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>WindowsDoctorAI.App</RootNamespace>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250401001" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WindowsDoctorAI.Core/WindowsDoctorAI.Core.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Domain/WindowsDoctorAI.Domain.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Application/WindowsDoctorAI.Application.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Infrastructure/WindowsDoctorAI.Infrastructure.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Diagnostics/WindowsDoctorAI.Diagnostics.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Repair/WindowsDoctorAI.Repair.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.AI/WindowsDoctorAI.AI.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Reporting/WindowsDoctorAI.Reporting.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Database/WindowsDoctorAI.Database.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

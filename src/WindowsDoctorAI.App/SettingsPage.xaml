@@ -1,0 +1,24 @@
+<Page
+    x:Class="WindowsDoctorAI.App.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Loaded="Page_Loaded">
+    <ScrollViewer>
+        <StackPanel Padding="36" Spacing="18" MaxWidth="760" HorizontalAlignment="Left">
+            <TextBlock Text="Configurações" FontSize="30" FontWeight="SemiBold" />
+            <TextBlock Text="Preferências aplicadas ao aplicativo neste computador." Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="12" Padding="20" Margin="0,8,0,0">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="Diagnósticos" FontSize="18" FontWeight="SemiBold" />
+                    <CheckBox Content="Salvar diagnósticos no histórico local (SQLite)"
+                              IsChecked="{Binding SaveDiagnosticHistory, Mode=TwoWay}" />
+                    <TextBlock Text="Desativar esta opção impede novas gravações; diagnósticos já salvos não são removidos." TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button Content="Salvar configurações" Command="{Binding SaveCommand}" HorizontalAlignment="Left" Style="{StaticResource AccentButtonStyle}" />
+                    <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" FontSize="12" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><RootNamespace>WindowsDoctorAI.Repair</RootNamespace></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WindowsDoctorAI.Core/WindowsDoctorAI.Core.csproj" />
+    <ProjectReference Include="../WindowsDoctorAI.Domain/WindowsDoctorAI.Domain.csproj" />
+  </ItemGroup>
+</Project>
