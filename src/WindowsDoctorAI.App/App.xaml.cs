@@ -16,7 +16,7 @@ using WindowsDoctorAI.Repair;
 namespace WindowsDoctorAI.App;
 
 /// <summary>Composition root: configuração, logging e registro explícito das implementações de cada camada.</summary>
-public partial class App : Application
+public partial class App : global::Microsoft.UI.Xaml.Application
 {
     private IHost? _host;
     private MainWindow? _mainWindow;
