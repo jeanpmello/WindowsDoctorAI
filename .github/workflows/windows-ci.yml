@@ -19,8 +19,11 @@ jobs:
         with:
           dotnet-version: 9.0.x
 
+      - name: Set up Visual Studio MSBuild
+        uses: microsoft/setup-msbuild@v3
+
       - name: Build solution
-        run: dotnet build WindowsDoctorAI.sln --configuration Release
+        run: msbuild WindowsDoctorAI.sln /restore /p:Configuration=Release
 
       - name: Run test suite
         run: dotnet test tests/WindowsDoctorAI.Tests/WindowsDoctorAI.Tests.csproj --configuration Release --no-build --no-restore
