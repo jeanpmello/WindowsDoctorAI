@@ -11,7 +11,7 @@ public sealed partial class HomePage : Page
 {
     private readonly HomeViewModel _viewModel;
 
-    public HomePage(HomeViewModel viewModel)
+    internal HomePage(HomeViewModel viewModel)
     {
         InitializeComponent();
         _viewModel = viewModel;

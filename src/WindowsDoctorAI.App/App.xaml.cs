@@ -66,7 +66,7 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                     services.AddTransient<MainWindow>();
                     services.AddTransient<HomeViewModel>();
                     services.AddTransient<SettingsViewModel>();
-                    services.AddTransient<HomePage>();
+                    services.AddTransient<HomePage>(provider => new HomePage(provider.GetRequiredService<HomeViewModel>()));
                     services.AddTransient<AboutPage>();
                     services.AddTransient<SettingsPage>();
                 })
