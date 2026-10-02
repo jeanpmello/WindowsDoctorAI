@@ -11,6 +11,24 @@ internal static class InventoryJson
     internal static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
 }
 
+internal sealed class RepairHistoryAuditMetadata
+{
+    public int PlanVersion { get; set; } = 1;
+    public string Target { get; set; } = string.Empty;
+    public string[] Preconditions { get; set; } = [];
+    public string[] Postconditions { get; set; } = [];
+    public string[] RollbackPreconditions { get; set; } = [];
+    public string[] RollbackPostconditions { get; set; } = [];
+    public RepairAction Action { get; set; } = RepairAction.Execute;
+    public Guid? RelatedRepairExecutionId { get; set; }
+    public Guid? ConsentId { get; set; }
+    public DateTimeOffset? ConsentConfirmedAtUtc { get; set; }
+    public string PlanFingerprint { get; set; } = string.Empty;
+    public bool ExecutionStarted { get; set; }
+    public RepairPostconditionStatus PostconditionStatus { get; set; } = RepairPostconditionStatus.NotEvaluated;
+    public string PostconditionDetails { get; set; } = string.Empty;
+}
+
 public sealed class SqliteDiagnosticRunRepository(WindowsDoctorDbContext dbContext) : IDiagnosticRunRepository
 {
     public async Task SaveAsync(DiagnosticRun run, CancellationToken cancellationToken = default)
@@ -143,19 +161,41 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
     public async Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-        dbContext.RepairHistory.Add(new RepairHistoryEntity
+        var entity = await dbContext.RepairHistory
+            .SingleOrDefaultAsync(item => item.Id == record.RepairExecutionId, cancellationToken)
+            .ConfigureAwait(false);
+        if (entity is null)
         {
-            Id = record.Id,
-            ProposalId = record.ProposalId,
-            Title = record.Title,
-            Status = record.Status,
-            Risk = record.Risk,
-            UserConfirmed = record.UserConfirmed,
-            RollbackSupported = record.RollbackSupported,
-            StartedAtUnixMilliseconds = record.StartedAtUtc.ToUnixTimeMilliseconds(),
-            CompletedAtUnixMilliseconds = record.CompletedAtUtc.ToUnixTimeMilliseconds(),
-            Details = record.Details.Length <= 2000 ? record.Details : record.Details[..2000]
-        });
+            entity = new RepairHistoryEntity { Id = record.RepairExecutionId };
+            dbContext.RepairHistory.Add(entity);
+        }
+
+        entity.ProposalId = record.RepairId;
+        entity.Title = record.Title;
+        entity.Status = record.Status;
+        entity.Risk = record.Risk;
+        entity.UserConfirmed = record.UserConfirmed;
+        entity.RollbackSupported = record.RollbackSupported;
+        entity.StartedAtUnixMilliseconds = record.StartedAtUtc.ToUnixTimeMilliseconds();
+        entity.CompletedAtUnixMilliseconds = record.CompletedAtUtc.ToUnixTimeMilliseconds();
+        entity.Details = record.Details.Length <= 2000 ? record.Details : record.Details[..2000];
+        entity.AuditMetadataJson = JsonSerializer.Serialize(new RepairHistoryAuditMetadata
+        {
+            PlanVersion = record.PlanVersion,
+            Target = record.Target,
+            Preconditions = record.Preconditions.ToArray(),
+            Postconditions = record.Postconditions.ToArray(),
+            RollbackPreconditions = record.RollbackPreconditions.ToArray(),
+            RollbackPostconditions = record.RollbackPostconditions.ToArray(),
+            Action = record.Action,
+            RelatedRepairExecutionId = record.RelatedRepairExecutionId,
+            ConsentId = record.ConsentId,
+            ConsentConfirmedAtUtc = record.ConsentConfirmedAtUtc,
+            PlanFingerprint = record.PlanFingerprint,
+            ExecutionStarted = record.ExecutionStarted,
+            PostconditionStatus = record.PostconditionStatus,
+            PostconditionDetails = record.PostconditionDetails
+        }, InventoryJson.Options);
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -166,17 +206,52 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
             .OrderByDescending(item => item.CompletedAtUnixMilliseconds)
             .Take(boundedCount)
             .ToListAsync(cancellationToken).ConfigureAwait(false);
-        return entities.Select(item => new RepairHistoryRecord(
-            item.Id,
-            item.ProposalId,
-            item.Title,
-            item.Status,
-            item.Risk,
-            item.UserConfirmed,
-            item.RollbackSupported,
-            DateTimeOffset.FromUnixTimeMilliseconds(item.StartedAtUnixMilliseconds),
-            DateTimeOffset.FromUnixTimeMilliseconds(item.CompletedAtUnixMilliseconds),
-            item.Details)).ToArray();
+        return entities.Select(ToRecord).ToArray();
+    }
+
+    public async Task<RepairHistoryRecord?> GetByExecutionIdAsync(
+        Guid repairExecutionId,
+        CancellationToken cancellationToken = default)
+    {
+        var entity = await dbContext.RepairHistory.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == repairExecutionId, cancellationToken)
+            .ConfigureAwait(false);
+        return entity is null ? null : ToRecord(entity);
+    }
+
+    private static RepairHistoryRecord ToRecord(RepairHistoryEntity entity)
+    {
+        var metadata = string.IsNullOrWhiteSpace(entity.AuditMetadataJson)
+            ? new RepairHistoryAuditMetadata()
+            : JsonSerializer.Deserialize<RepairHistoryAuditMetadata>(entity.AuditMetadataJson, InventoryJson.Options)
+                ?? new RepairHistoryAuditMetadata();
+        return new RepairHistoryRecord(
+            entity.Id,
+            entity.ProposalId,
+            entity.Title,
+            entity.Status,
+            entity.Risk,
+            entity.UserConfirmed,
+            entity.RollbackSupported,
+            DateTimeOffset.FromUnixTimeMilliseconds(entity.StartedAtUnixMilliseconds),
+            DateTimeOffset.FromUnixTimeMilliseconds(entity.CompletedAtUnixMilliseconds),
+            entity.Details)
+        {
+            PlanVersion = metadata.PlanVersion,
+            Target = metadata.Target,
+            Preconditions = metadata.Preconditions,
+            Postconditions = metadata.Postconditions,
+            RollbackPreconditions = metadata.RollbackPreconditions,
+            RollbackPostconditions = metadata.RollbackPostconditions,
+            Action = metadata.Action,
+            RelatedRepairExecutionId = metadata.RelatedRepairExecutionId,
+            ConsentId = metadata.ConsentId,
+            ConsentConfirmedAtUtc = metadata.ConsentConfirmedAtUtc,
+            PlanFingerprint = metadata.PlanFingerprint,
+            ExecutionStarted = metadata.ExecutionStarted,
+            PostconditionStatus = metadata.PostconditionStatus,
+            PostconditionDetails = metadata.PostconditionDetails
+        };
     }
 }
 
@@ -208,7 +283,7 @@ public static class DatabaseServiceCollectionExtensions
 /// <summary>Schema local evolui em passos idempotentes; PRAGMA user_version identifica o último passo concluído.</summary>
 public static class WindowsDoctorDatabaseMigrator
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public static async Task MigrateAsync(WindowsDoctorDbContext context, CancellationToken cancellationToken = default)
     {
@@ -249,9 +324,18 @@ public static class WindowsDoctorDatabaseMigrator
                     "RollbackSupported" INTEGER NOT NULL,
                     "StartedAtUnixMilliseconds" INTEGER NOT NULL,
                     "CompletedAtUnixMilliseconds" INTEGER NOT NULL,
-                    "Details" TEXT NOT NULL);
+                    "Details" TEXT NOT NULL,
+                    "AuditMetadataJson" TEXT NOT NULL DEFAULT '{{}}');
                 CREATE INDEX IF NOT EXISTS "IX_RepairHistory_CompletedAtUnixMilliseconds" ON "RepairHistory" ("CompletedAtUnixMilliseconds");
                 """, cancellationToken).ConfigureAwait(false);
+
+            if (!await HasRepairHistoryMetadataColumnAsync(context, cancellationToken).ConfigureAwait(false))
+            {
+                await context.Database.ExecuteSqlRawAsync("""
+                    ALTER TABLE "RepairHistory" ADD COLUMN "AuditMetadataJson" TEXT NOT NULL DEFAULT '{{}}';
+                    """, cancellationToken).ConfigureAwait(false);
+            }
+
             await context.Database.ExecuteSqlRawAsync($"PRAGMA user_version = {CurrentVersion};", cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -259,5 +343,20 @@ public static class WindowsDoctorDatabaseMigrator
         {
             await context.Database.CloseConnectionAsync().ConfigureAwait(false);
         }
+    }
+
+    private static async Task<bool> HasRepairHistoryMetadataColumnAsync(
+        WindowsDoctorDbContext context,
+        CancellationToken cancellationToken)
+    {
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "PRAGMA table_info(\"RepairHistory\");";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (string.Equals(reader.GetString(1), "AuditMetadataJson", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 }

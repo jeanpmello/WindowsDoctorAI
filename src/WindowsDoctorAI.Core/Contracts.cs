@@ -56,4 +56,10 @@ public interface IRepairAuditLog
 {
     Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default);
+
+    async Task<RepairHistoryRecord?> GetByExecutionIdAsync(Guid repairExecutionId, CancellationToken cancellationToken = default)
+    {
+        var recent = await GetRecentAsync(500, cancellationToken).ConfigureAwait(false);
+        return recent.FirstOrDefault(record => record.RepairExecutionId == repairExecutionId);
+    }
 }

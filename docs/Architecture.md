@@ -52,9 +52,13 @@ O serviço HTML está disponível na camada de aplicação, mas ainda não exist
 
 ## Framework de reparos
 
-`RepairEngine` recebe plugins confiáveis registrados em código, exige confirmação booleana explícita para executar ou tentar rollback e grava cada tentativa na auditoria SQLite. O plugin inerte de demonstração e os fakes dos testes não alteram o Windows. A composição do desktop não registra nenhum `IRepairPlugin`; portanto, não há reparo de sistema disponível nem comando/processo executado neste milestone. A importação JSON não pode registrar plugin.
+`RepairEngine` recebe plugins confiáveis registrados em código. A nova confirmação é um objeto imutável vinculado a `RepairId`, versão, risco, alvo, ação e fingerprint do plano; um booleano legado nunca autoriza execução. Cada tentativa recebe `RepairExecutionId` e é gravada no SQLite antes da chamada ao plugin. O plugin precisa persistir o marco de início antes de qualquer efeito; falhas e cancelamentos são finalizados sem reutilizar o token cancelado. Se o processo parar após o marco, o último estado auditado permanece para revisão.
 
-A interface prevê risco, impacto, confirmação e suporte opcional a rollback. Um plugin real futuro exigirá revisão própria de pré-condições, efeito, privilégios, ponto de restauração quando viável, logs sem segredos e testes Windows; a existência do contrato não autoriza sua implementação ou execução.
+Rollback só pode referenciar um `RepairExecutionId` original concluído com sucesso, exige consentimento separado para a ação de rollback e registra seu próprio ID ligado à origem; exceções de rollback também são auditadas. Pré/pós-condições são declarações nos tipos, não verificações automáticas: o resultado de pós-condições começa como `NotEvaluated`, e não há checagem interna do Windows. Plugins antigos ainda compilam, mas o adaptador conservador marca seu início antes de chamá-los; rollback legado sem ID não é usado.
+
+O plugin inerte de demonstração e os fakes determinísticos dos testes não alteram o Windows. A composição do desktop não registra nenhum `IRepairPlugin`; portanto, não há reparo de sistema disponível nem comando/processo executado neste milestone. A importação JSON não pode registrar plugin. A existência dos contratos não autoriza implementar ou executar reparo real.
+
+Um plugin real futuro exigirá revisão própria de pré-condições, verificação de pós-condições, alvo, efeito, privilégios mínimos, ponto de restauração quando viável, logs sem segredos e testes em Windows isolado; esta fatia não valida APIs, resultados ou logs do Windows.
 
 ## Validação pendente
 

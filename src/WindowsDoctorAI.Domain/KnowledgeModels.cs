@@ -124,7 +124,31 @@ public enum RepairExecutionStatus
     NotImplemented,
     Succeeded,
     Failed,
-    RolledBack
+    RolledBack,
+    Prepared,
+    Started,
+    Cancelled,
+    RollbackFailed
+}
+
+public enum RepairAction
+{
+    Execute,
+    Rollback
+}
+
+public enum RepairPostconditionStatus
+{
+    NotEvaluated,
+    Verified,
+    Failed
+}
+
+/// <summary>Resultado declarado pelo plugin; NotEvaluated é o padrão e não afirma estado do Windows.</summary>
+public sealed record RepairPostconditionReport(RepairPostconditionStatus Status, string Details)
+{
+    public static RepairPostconditionReport NotEvaluated { get; } =
+        new(RepairPostconditionStatus.NotEvaluated, "Nenhuma verificação de pós-condições foi realizada.");
 }
 
 /// <summary>Metadados para uma proposta; este milestone não inclui ações que alterem o Windows.</summary>
@@ -135,7 +159,113 @@ public sealed record RepairProposal(
     RepairRiskLevel Risk,
     string Impact,
     bool RequiresExplicitApproval = true,
-    bool SupportsRollback = false);
+    bool SupportsRollback = false,
+    int PlanVersion = 1,
+    string Target = "",
+    IReadOnlyList<string>? Preconditions = null,
+    IReadOnlyList<string>? Postconditions = null,
+    IReadOnlyList<string>? RollbackPreconditions = null,
+    IReadOnlyList<string>? RollbackPostconditions = null);
+
+/// <summary>Consentimento imutável para exatamente uma ação, versão do plano, risco e alvo.</summary>
+public sealed class RepairConsent
+{
+    private RepairConsent(
+        Guid consentId,
+        string repairId,
+        int planVersion,
+        RepairRiskLevel risk,
+        string target,
+        RepairAction action,
+        Guid? relatedRepairExecutionId,
+        DateTimeOffset confirmedAtUtc,
+        string planFingerprint)
+    {
+        ConsentId = consentId;
+        RepairId = repairId;
+        PlanVersion = planVersion;
+        Risk = risk;
+        Target = target;
+        Action = action;
+        RelatedRepairExecutionId = relatedRepairExecutionId;
+        ConfirmedAtUtc = confirmedAtUtc;
+        PlanFingerprint = planFingerprint;
+    }
+
+    public Guid ConsentId { get; }
+    public string RepairId { get; }
+    public int PlanVersion { get; }
+    public RepairRiskLevel Risk { get; }
+    public string Target { get; }
+    public RepairAction Action { get; }
+    public Guid? RelatedRepairExecutionId { get; }
+    public DateTimeOffset ConfirmedAtUtc { get; }
+    public string PlanFingerprint { get; }
+
+    /// <summary>Crie somente depois de apresentar e confirmar a proposta exata ao usuário.</summary>
+    public static RepairConsent Confirm(RepairProposal proposal, DateTimeOffset? confirmedAtUtc = null) =>
+        Create(proposal, RepairAction.Execute, null, confirmedAtUtc);
+
+    /// <summary>Rollback requer confirmação separada e referência à execução que será revertida.</summary>
+    public static RepairConsent ConfirmRollback(
+        RepairProposal proposal,
+        Guid repairExecutionId,
+        DateTimeOffset? confirmedAtUtc = null)
+    {
+        if (repairExecutionId == Guid.Empty)
+            throw new ArgumentException("A execução original deve ter um ID válido.", nameof(repairExecutionId));
+        return Create(proposal, RepairAction.Rollback, repairExecutionId, confirmedAtUtc);
+    }
+
+    public bool IsBoundTo(RepairProposal proposal, RepairAction action, Guid? relatedRepairExecutionId = null) =>
+        action == Action
+        && relatedRepairExecutionId == RelatedRepairExecutionId
+        && string.Equals(RepairId, proposal.Id, StringComparison.Ordinal)
+        && PlanVersion == proposal.PlanVersion
+        && Risk == proposal.Risk
+        && string.Equals(Target, proposal.Target, StringComparison.Ordinal)
+        && string.Equals(PlanFingerprint, CalculatePlanFingerprint(proposal), StringComparison.Ordinal);
+
+    internal static string CalculatePlanFingerprint(RepairProposal proposal)
+    {
+        var payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            proposal.Id,
+            proposal.PlanVersion,
+            proposal.Title,
+            proposal.Description,
+            proposal.Risk,
+            proposal.Impact,
+            proposal.RequiresExplicitApproval,
+            proposal.SupportsRollback,
+            proposal.Target,
+            Preconditions = proposal.Preconditions ?? Array.Empty<string>(),
+            Postconditions = proposal.Postconditions ?? Array.Empty<string>(),
+            RollbackPreconditions = proposal.RollbackPreconditions ?? Array.Empty<string>(),
+            RollbackPostconditions = proposal.RollbackPostconditions ?? Array.Empty<string>()
+        });
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload));
+    }
+
+    private static RepairConsent Create(
+        RepairProposal proposal,
+        RepairAction action,
+        Guid? relatedRepairExecutionId,
+        DateTimeOffset? confirmedAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+        ArgumentException.ThrowIfNullOrWhiteSpace(proposal.Id);
+        if (proposal.PlanVersion < 1)
+            throw new ArgumentOutOfRangeException(nameof(proposal), "A versão do plano deve ser positiva.");
+        if (proposal.Risk == RepairRiskLevel.Unknown)
+            throw new InvalidOperationException("Não é possível consentir com um plano cujo risco não foi declarado.");
+        ArgumentException.ThrowIfNullOrWhiteSpace(proposal.Target);
+
+        return new RepairConsent(Guid.NewGuid(), proposal.Id, proposal.PlanVersion, proposal.Risk, proposal.Target,
+            action, relatedRepairExecutionId, confirmedAtUtc ?? DateTimeOffset.UtcNow,
+            CalculatePlanFingerprint(proposal));
+    }
+}
 
 /// <summary>Registro auditável sem comandos, segredos ou dados integrais do inventário.</summary>
 public sealed record RepairHistoryRecord(
@@ -148,4 +278,23 @@ public sealed record RepairHistoryRecord(
     bool RollbackSupported,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset CompletedAtUtc,
-    string Details);
+    string Details)
+{
+    /// <summary>O ID primário do registro também identifica a tentativa de execução, inclusive recusas.</summary>
+    public Guid RepairExecutionId => Id;
+    public string RepairId => ProposalId;
+    public int PlanVersion { get; init; } = 1;
+    public string Target { get; init; } = string.Empty;
+    public IReadOnlyList<string> Preconditions { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> Postconditions { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> RollbackPreconditions { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> RollbackPostconditions { get; init; } = Array.Empty<string>();
+    public RepairAction Action { get; init; } = RepairAction.Execute;
+    public Guid? RelatedRepairExecutionId { get; init; }
+    public Guid? ConsentId { get; init; }
+    public DateTimeOffset? ConsentConfirmedAtUtc { get; init; }
+    public string PlanFingerprint { get; init; } = string.Empty;
+    public bool ExecutionStarted { get; init; }
+    public RepairPostconditionStatus PostconditionStatus { get; init; } = RepairPostconditionStatus.NotEvaluated;
+    public string PostconditionDetails { get; init; } = "";
+}

@@ -1,6 +1,6 @@
 # Banco de dados
 
-**Estado:** EF Core 9 e SQLite local; o schema tem versão independente, rastreada por `PRAGMA user_version`. A versão atual é 1. A aplicação não usa migrations EF Core geradas; `WindowsDoctorDatabaseMigrator` aplica passos SQL incrementais idempotentes.
+**Estado:** EF Core 9 e SQLite local; o schema tem versão independente, rastreada por `PRAGMA user_version`. A versão atual é 2. A aplicação não usa migrations EF Core geradas; `WindowsDoctorDatabaseMigrator` aplica passos SQL incrementais idempotentes.
 
 ## Localização e atualização
 
@@ -14,7 +14,9 @@ Qualquer alteração futura deve adicionar um próximo passo sequencial, dentro 
 - **`UserSettings`** — preferência local `SaveDiagnosticHistory`.
 - **`KnowledgeRules`** — uma linha por `RuleId` + `RuleVersion`; guarda versão do pacote, payload declarativo JSON e data de importação. Os payloads anteriores são preservados; regra com mesmo ID/versão e conteúdo diferente é recusada.
 - **`KnowledgeBaseVersions`** — versão do pacote, origem declarada, SHA-256 do arquivo JSON, quantidade de regras e data de importação. O hash permite detectar repetição/conflito de conteúdo; não certifica assinatura, autoria nem validade de referência.
-- **`RepairHistory`** — proposta, status, risco declarado, confirmação, suporte a rollback, horários e detalhes limitados. Não há coluna de comando/script.
+- **`RepairHistory`** — uma linha por `RepairExecutionId` (o ID primário existente), com proposta, status, risco declarado, confirmação e detalhes limitados. `AuditMetadataJson` acrescenta versão/alvo/condições declaradas, hash do plano, ID e horário do consentimento, ação, início efetivo, estado da verificação pós-condições e `RelatedRepairExecutionId` em rollback. Não há coluna de comando/script.
+
+A migração 2 adiciona `AuditMetadataJson` com valor padrão `{}` e preserva linhas do schema 1. O repositório grava a preparação antes de chamar um plugin e atualiza a mesma linha ao sinalizar início e ao concluir; uma interrupção após o início deixa o último estado persistido para revisão. Se a gravação prévia falhar, o plugin não é chamado.
 
 ## Importação e uso
 

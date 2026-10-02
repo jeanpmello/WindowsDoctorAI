@@ -249,17 +249,18 @@ public sealed class MilestoneThreeTests
         var audit = new InMemoryRepairAuditLog();
         var engine = new RepairEngine([plugin], audit);
 
-        var declined = await engine.ExecuteAsync(plugin.Proposal.Id, userConfirmed: false);
+        var declined = await engine.ExecuteAsync(plugin.Proposal.Id, consent: null);
         Assert.Equal(RepairExecutionStatus.Declined, declined.Status);
         Assert.Equal(0, plugin.ExecuteCount);
         Assert.False(declined.UserConfirmed);
 
-        var confirmed = await engine.ExecuteAsync(plugin.Proposal.Id, userConfirmed: true);
+        var confirmed = await engine.ExecuteAsync(plugin.Proposal.Id, RepairConsent.Confirm(plugin.Proposal));
         Assert.Equal(RepairExecutionStatus.Succeeded, confirmed.Status);
         Assert.Equal(1, plugin.ExecuteCount);
         Assert.Equal(2, audit.Records.Count);
 
-        var unsupportedRollback = await engine.RollbackAsync(plugin.Proposal.Id, userConfirmed: true);
+        var unsupportedRollback = await engine.RollbackAsync(confirmed.RepairExecutionId,
+            RepairConsent.ConfirmRollback(plugin.Proposal, confirmed.RepairExecutionId));
         Assert.Equal(RepairExecutionStatus.NotImplemented, unsupportedRollback.Status);
         Assert.Equal(0, plugin.RollbackCount);
         Assert.Equal(3, audit.Records.Count);
@@ -385,6 +386,7 @@ public sealed class MilestoneThreeTests
         public List<RepairHistoryRecord> Records { get; } = [];
         public Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
         {
+            Records.RemoveAll(existing => existing.RepairExecutionId == record.RepairExecutionId);
             Records.Add(record);
             return Task.CompletedTask;
         }
@@ -395,7 +397,8 @@ public sealed class MilestoneThreeTests
     private sealed class TestRepairPlugin : IRepairPlugin
     {
         public RepairProposal Proposal { get; } = new("test.inert", "Fake inerte", "Somente teste sem mudança de sistema.",
-            RepairRiskLevel.Low, "Nenhum impacto real.", SupportsRollback: false);
+            RepairRiskLevel.Low, "Nenhum impacto real.", SupportsRollback: false, PlanVersion: 1,
+            Target: "Fake local; sem alvo do sistema");
         public int ExecuteCount { get; private set; }
         public int RollbackCount { get; private set; }
         public Task<string> ExecuteAsync(CancellationToken cancellationToken = default)

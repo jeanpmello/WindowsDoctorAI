@@ -46,6 +46,7 @@ public sealed class RepairHistoryEntity
     public long StartedAtUnixMilliseconds { get; set; }
     public long CompletedAtUnixMilliseconds { get; set; }
     public string Details { get; set; } = string.Empty;
+    public string AuditMetadataJson { get; set; } = "{}";
 }
 
 /// <summary>Contexto SQLite local. O inicializador aplica migrações incrementais identificadas por PRAGMA user_version.</summary>
@@ -94,6 +95,7 @@ public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbConte
             entity.HasKey(item => item.Id);
             entity.HasIndex(item => item.CompletedAtUnixMilliseconds);
             entity.Property(item => item.Details).IsRequired();
+            entity.Property(item => item.AuditMetadataJson).IsRequired();
         });
     }
 }
