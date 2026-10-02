@@ -11,7 +11,8 @@ public sealed class HtmlDiagnosticReportFormatter
         DiagnosticRun run,
         IReadOnlyList<DiagnosticRecommendation> recommendations,
         RootCauseAnalysis analysis,
-        IReadOnlyList<RepairHistoryRecord> repairHistory)
+        IReadOnlyList<RepairHistoryRecord> repairHistory,
+        int knowledgeRuleCount = -1)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(recommendations);
@@ -49,10 +50,14 @@ public sealed class HtmlDiagnosticReportFormatter
         builder.AppendLine("</section>");
 
         builder.AppendLine("<section class=\"card\"><h2>Recomendações</h2>");
-        if (recommendations.Count == 0) builder.AppendLine("<p>Nenhuma regra importada correspondeu aos achados desta execução; nenhuma recomendação de conhecimento foi gerada.</p>");
+        if (knowledgeRuleCount == 0)
+            builder.AppendLine("<p>A Knowledge Base está vazia: nenhum pacote foi importado. Nenhuma recomendação de conhecimento foi gerada.</p>");
+        else if (recommendations.Count == 0)
+            builder.AppendLine("<p>Nenhuma regra importada correspondeu aos achados desta execução; nenhuma recomendação de conhecimento foi gerada.</p>");
         foreach (var recommendation in recommendations)
         {
-            builder.Append("<article class=\"item\"><h3>").Append(E(recommendation.Title)).Append("</h3><p>").Append(E(recommendation.Domain)).Append(" · impacto informado: ").Append(E(Label(recommendation.Impact))).Append(" · confiança do match: ").Append(E(Label(recommendation.Confidence))).AppendLine("</p>");
+            builder.Append("<article class=\"item\"><h3>").Append(E(recommendation.Title)).Append("</h3><p>").Append(E(recommendation.Domain)).Append(" · impacto informado: ").Append(E(Label(recommendation.Impact))).Append(" · força do match literal: ").Append(E(Label(recommendation.Confidence))).AppendLine("</p>");
+            builder.AppendLine("<p class=\"muted\">A força do match literal não é probabilidade de causa ou de sucesso; impacto e referências são declarações do pacote, não verificadas pelo aplicativo.</p>");
             builder.Append("<p>").Append(E(recommendation.Explanation)).Append(" ").Append(E(recommendation.ConfidenceExplanation)).AppendLine("</p>");
             AppendList(builder, "Causas descritas pela regra", recommendation.Causes);
             AppendList(builder, "Soluções descritas pela regra (não executadas)", recommendation.Solutions);
@@ -88,7 +93,7 @@ public sealed class HtmlDiagnosticReportFormatter
         if (repairHistory.Count == 0) builder.AppendLine("<p>Nenhuma proposta de reparo foi registrada.</p>");
         else foreach (var item in repairHistory)
             builder.Append("<article class=\"item\"><strong>").Append(E(item.Title)).Append("</strong> · ").Append(E(Label(item.Status))).Append(" · risco informado: ").Append(E(Label(item.Risk))).Append(" · confirmação: ").Append(item.UserConfirmed ? "sim" : "não").Append(" · rollback anunciado: ").Append(item.RollbackSupported ? "sim" : "não").Append("<p>").Append(E(item.Details)).Append("</p><p class=\"muted\">").Append(E(item.CompletedAtUtc.ToString("u"))).AppendLine("</p></article>");
-        builder.AppendLine("</section><footer>Relatório gerado localmente. Regras, referências, causas, soluções, impacto e confiança são dados declarados ou correspondências textuais; não constituem diagnóstico causal confirmado. Nenhum reparo é executado por este relatório.</footer></body></html>");
+        builder.AppendLine("</section><footer>Relatório gerado localmente. Pacotes e fontes declaradas não têm autoria autenticada pelo aplicativo; regras, referências, causas, soluções e impacto são dados declarados. A força de match descreve correspondência textual, não probabilidade de causa ou sucesso. Correlações não determinam causa. Nenhum reparo é executado por este relatório.</footer></body></html>");
         return builder.ToString();
     }
 

@@ -17,7 +17,7 @@ Este roadmap distingue componentes implementados de integração visual, valida�
 
 Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, SMART e hardware em Windows.
 
-## Milestone 3 — Knowledge & Repair Platform (base implementada; integração/validação pendentes)
+## Milestone 3 — Knowledge & Repair Platform (fluxos principais implementados; validação Windows pendente)
 
 - Modelo de regra com ID/versão, domínio, erros, sintomas, causas, soluções, impacto e referências.
 - Importador JSON de schema estrito e limitado; conteúdo é inerte, exige HTTPS em referências e nunca pode registrar comandos/plugins.
@@ -25,17 +25,17 @@ Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, S
 - Recommendation Engine que liga achados a códigos/sintomas literais, apresenta evidências, impacto declarado e confiança categórica explicada. Sem regra semeada como fato; nenhuma probabilidade artificial.
 - Root Cause Analyzer de associações observacionais por identificadores compartilhados. Não determina causa nem sequência temporal.
 - Repair Engine com contratos de plugins confiáveis registrados em código, confirmação, risco, auditoria e rollback opcional. A composição não registra reparos reais; plugin de teste/demo é inerte.
-- Serviço para relatório HTML local com resumo, Health Score, evidências, recomendações, fontes declaradas e histórico de propostas; saída codificada e sem scripts remotos.
-- Testes de unidade e migração SQLite para regras, validação, correspondência, correlação, confirmação, auditoria e HTML.
+- Serviço e ação WinUI para gerar e salvar relatório HTML local da execução atual/mais recente, com resumo, Health Score, evidências, recomendações e histórico de propostas; saída escapada e sem recursos/scripts remotos.
+- Ação WinUI para selecionar pacote JSON local, validar e revisar versão, fonte declarada, hash SHA-256 e total de regras antes da importação; base vazia é explícita e falhas/conflitos não deixam gravação parcial.
+- Testes de unidade e migração SQLite para regras, prévia/importação atômica, validação, correspondência, correlação, confirmação, auditoria e composição/escape HTML.
 
-Não incluído: PDF gerado no app, tela de importação/exportação na WinUI, plugin que modifique o Windows ou regras oficiais preinstaladas. Validação XAML/WinUI e testes em Windows permanecem pendentes.
+Não incluído: PDF gerado no app, plugin que modifique o Windows ou regras oficiais preinstaladas. Validação XAML/WinUI e testes end-to-end em Windows permanecem pendentes.
 
 ## Próximas etapas de qualidade
 
-- Definir experiência da interface para importar pacote revisado e salvar/exportar relatório HTML.
-- Definir origem assinada/proveniência e critérios revisados para impacto e confiança; avaliar regras com evidência de fontes reconhecidas.
+- Definir assinatura/proveniência verificável e processo de revisão antes de tratar pacotes/fontes como oficiais; hash atual só identifica bytes e não comprova autoria.
+- Definir minimização/redação de evidências e políticas de retenção, remoção, compartilhamento e proteção em repouso para relatórios/histórico.
 - Exercitar migração em cópia de bancos usados, incluindo rollback da atualização de schema.
-- Definir retenção, remoção, compartilhamento e eventual proteção em repouso para relatórios/histórico.
 
 ## Visões futuras (fora do Milestone 3)
 

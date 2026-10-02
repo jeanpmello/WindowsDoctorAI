@@ -23,6 +23,6 @@ public sealed class DiagnosticAssessmentService(
             ? new RootCauseAnalysis("A execução não contém resultados diagnósticos; a causa raiz permanece indeterminada.", Array.Empty<CorrelationObservation>())
             : rootCauseAnalyzer.Analyze(run.Report);
         var history = await repairAuditLog.GetRecentAsync(100, cancellationToken).ConfigureAwait(false);
-        return htmlFormatter.Format(run, recommendations, analysis, history);
+        return htmlFormatter.Format(run, recommendations, analysis, history, rules.Count);
     }
 }

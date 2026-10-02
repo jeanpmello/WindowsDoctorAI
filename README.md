@@ -9,10 +9,10 @@ Aplicativo desktop para Windows em WinUI 3/.NET 9, organizado para diagnóstico 
 - Health Score heurístico existente: 100 menos 25 por achado crítico e 8 por aviso, limitado a 0–100; não é calculado sem checagens confirmadas e não representa saúde global.
 - Knowledge Engine com modelo de regras e versões, banco SQLite versionado, importador JSON estrito e limitado, Recommendation Engine explicável e Root Cause Analyzer conservador.
 - Framework de plugins de reparo com confirmação, risco, auditoria e rollback opcional. **Nenhum plugin que altere o Windows está registrado; não executa comandos, scripts ou mudanças neste milestone.**
-- Serviço para gerar relatório HTML local com resumo, score, evidências, correlações, recomendações e histórico de propostas. A interface de exportação ainda não está ligada à WinUI; PDF não é gerado pelo app.
+- A tela inicial permite selecionar um pacote JSON local, revisar versão, fonte declarada, hash SHA-256 e total de regras antes de importar, e salvar um relatório HTML da execução atual/mais recente. O relatório inclui score, evidências, correlações, recomendações disponíveis e histórico de propostas; PDF não é gerado pelo app.
 - IA sem provedor ativo. Nenhum inventário é enviado a serviço externo.
 
-Knowledge Base começa vazia. Não há regra confirmada semeada para `0x80070005` ou outros códigos. Impacto e referências são declarados pelo pacote importado; o app não valida automaticamente a fonte. Confiança é uma categoria de força do match literal, não uma probabilidade de causa ou sucesso. O Root Cause Analyzer só aponta identificadores compartilhados e nunca declara causa determinada.
+Knowledge Base começa vazia. Não há regra confirmada semeada para `0x80070005` ou outros códigos. A prévia valida schema e limites sem gravar; a importação de um pacote inválido ou conflitante é recusada sem gravação parcial. Versão, fonte e hash são metadados declarados: hash identifica o conteúdo, mas não comprova autoria ou veracidade. Confiança é força do match literal, não probabilidade de causa ou sucesso. O Root Cause Analyzer só aponta identificadores compartilhados e nunca declara causa determinada.
 
 ## Estrutura
 
@@ -52,7 +52,7 @@ O banco `windowsdoctorai.db` é criado em `%LOCALAPPDATA%\WindowsDoctorAI\`. Sch
 
 ## Testes e limites
 
-Testes unitários cobrem lógica, importação, matches, correlações, confirmação e HTML; testes SQLite cobrem persistência e atualização do schema. Fontes falsas não provam que WUA, WMI, SMART, XAML/WinUI ou Event Viewer funcionem em hardware real.
+Testes unitários cobrem lógica, prévia/importação sem gravação parcial, matches, correlações, confirmação e composição/escape do HTML; testes SQLite cobrem persistência e atualização do schema. Fontes falsas não provam que WUA, WMI, SMART, XAML/WinUI ou Event Viewer funcionem em hardware real.
 
 No Linux é possível testar bibliotecas e SQLite com .NET 9. A validação de XAML depende do compilador do Windows App SDK; build/execução da UI e APIs nativas devem ser verificados em Windows. A edição Enterprise, timeline, comparador, dashboard corporativo, assistente IA e reparos reais continuam no roadmap.
 

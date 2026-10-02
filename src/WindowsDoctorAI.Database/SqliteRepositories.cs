@@ -76,49 +76,65 @@ public sealed class SqliteKnowledgeRepository(WindowsDoctorDbContext dbContext) 
     {
         ArgumentNullException.ThrowIfNull(package);
         ArgumentException.ThrowIfNullOrWhiteSpace(sha256);
-        var existingPackage = await dbContext.KnowledgeBaseVersions.AsNoTracking()
-            .SingleOrDefaultAsync(item => item.Version == package.Version, cancellationToken).ConfigureAwait(false);
-        if (existingPackage is not null)
-        {
-            if (!string.Equals(existingPackage.Sha256, sha256, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"A versão de base '{package.Version}' já existe com conteúdo diferente.");
-            return;
-        }
-
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var rule in package.Rules)
+        var addedRules = new List<KnowledgeRuleEntity>();
+        KnowledgeBaseVersionEntity? addedPackage = null;
+        try
         {
-            var payload = JsonSerializer.Serialize(rule, InventoryJson.Options);
-            var previous = await dbContext.KnowledgeRules.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.RuleId == rule.Id && item.RuleVersion == rule.Version, cancellationToken)
-                .ConfigureAwait(false);
-            if (previous is not null)
+            var existingPackage = await dbContext.KnowledgeBaseVersions.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Version == package.Version, cancellationToken).ConfigureAwait(false);
+            if (existingPackage is not null)
             {
-                if (!string.Equals(previous.PayloadJson, payload, StringComparison.Ordinal))
-                    throw new InvalidOperationException($"A regra {rule.Id} v{rule.Version} já existe com conteúdo diferente; incremente a versão da regra.");
-                continue;
+                if (!string.Equals(existingPackage.Sha256, sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"A versão de base '{package.Version}' já existe com conteúdo diferente.");
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return;
             }
-            dbContext.KnowledgeRules.Add(new KnowledgeRuleEntity
-            {
-                RuleId = rule.Id,
-                RuleVersion = rule.Version,
-                PackageVersion = package.Version,
-                PayloadJson = payload,
-                ImportedAtUnixMilliseconds = now
-            });
-        }
 
-        dbContext.KnowledgeBaseVersions.Add(new KnowledgeBaseVersionEntity
+            var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            foreach (var rule in package.Rules)
+            {
+                var payload = JsonSerializer.Serialize(rule, InventoryJson.Options);
+                var previous = await dbContext.KnowledgeRules.AsNoTracking()
+                    .SingleOrDefaultAsync(item => item.RuleId == rule.Id && item.RuleVersion == rule.Version, cancellationToken)
+                    .ConfigureAwait(false);
+                if (previous is not null)
+                {
+                    if (!string.Equals(previous.PayloadJson, payload, StringComparison.Ordinal))
+                        throw new InvalidOperationException($"A regra {rule.Id} v{rule.Version} já existe com conteúdo diferente; incremente a versão da regra.");
+                    continue;
+                }
+                addedRules.Add(new KnowledgeRuleEntity
+                {
+                    RuleId = rule.Id,
+                    RuleVersion = rule.Version,
+                    PackageVersion = package.Version,
+                    PayloadJson = payload,
+                    ImportedAtUnixMilliseconds = now
+                });
+            }
+
+            dbContext.KnowledgeRules.AddRange(addedRules);
+            addedPackage = new KnowledgeBaseVersionEntity
+            {
+                Version = package.Version,
+                Source = package.Source,
+                Sha256 = sha256,
+                RuleCount = package.Rules.Count,
+                ImportedAtUnixMilliseconds = now
+            };
+            dbContext.KnowledgeBaseVersions.Add(addedPackage);
+            await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
         {
-            Version = package.Version,
-            Source = package.Source,
-            Sha256 = sha256,
-            RuleCount = package.Rules.Count,
-            ImportedAtUnixMilliseconds = now
-        });
-        await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch { /* Preserve the original validation/persistence exception. */ }
+            foreach (var rule in addedRules) dbContext.Entry(rule).State = EntityState.Detached;
+            if (addedPackage is not null) dbContext.Entry(addedPackage).State = EntityState.Detached;
+            throw;
+        }
     }
 }
 

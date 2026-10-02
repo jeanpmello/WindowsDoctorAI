@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using WindowsDoctorAI.Application;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Database;
@@ -120,6 +122,73 @@ public sealed class MilestoneThreeTests
         Assert.False(persistedHistory.UserConfirmed);
     }
 
+    [Fact]
+    public async Task ImporterPreviewShowsDeclaredMetadataAndHashWithoutPersisting()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context);
+        var importer = new KnowledgeJsonImporter(new SqliteKnowledgeRepository(context));
+
+        var preview = importer.Preview(ValidPackageJson);
+
+        Assert.Equal("fixture-v1", preview.Version);
+        Assert.Equal("fixture local de teste", preview.Source);
+        Assert.Equal(1, preview.RuleCount);
+        Assert.Equal(64, preview.Sha256.Length);
+        Assert.Equal(0, await context.KnowledgeRules.CountAsync());
+        Assert.Equal(0, await context.KnowledgeBaseVersions.CountAsync());
+    }
+
+    [Fact]
+    public async Task InvalidPackageIsRejectedBeforeAnySqliteWrite()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context);
+        var importer = new KnowledgeJsonImporter(new SqliteKnowledgeRepository(context));
+        var invalidJson = ValidPackageJson.Replace("\"impact\": \"moderate\"", "\"impact\": \"not-an-impact\"", StringComparison.Ordinal);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => importer.ImportAsync(invalidJson));
+
+        Assert.Equal(0, await context.KnowledgeRules.CountAsync());
+        Assert.Equal(0, await context.KnowledgeBaseVersions.CountAsync());
+    }
+
+    [Fact]
+    public async Task ConflictingRuleRejectsWholePackageAndLeavesContextCleanForLaterImport()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context);
+        var repository = new SqliteKnowledgeRepository(context);
+        var importer = new KnowledgeJsonImporter(repository);
+        await importer.ImportAsync(ValidPackageJson);
+        var conflictingPackage = CreatePackageJson("fixture-v2",
+            Rule("new-before-conflict", [], [], KnowledgeImpact.Low),
+            Rule("fixture-rule", ["0xDIFFERENT"], [], KnowledgeImpact.Moderate));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => importer.ImportAsync(conflictingPackage));
+
+        Assert.Equal(1, await context.KnowledgeRules.CountAsync());
+        Assert.Equal(1, await context.KnowledgeBaseVersions.CountAsync());
+        Assert.DoesNotContain(await context.KnowledgeRules.ToListAsync(), item => item.RuleId == "new-before-conflict");
+
+        await importer.ImportAsync(CreatePackageJson("fixture-v3", Rule("recovered-rule", [], [], KnowledgeImpact.Low)));
+        Assert.Equal(2, await context.KnowledgeRules.CountAsync());
+        Assert.Equal(2, await context.KnowledgeBaseVersions.CountAsync());
+        Assert.DoesNotContain(await context.KnowledgeRules.ToListAsync(), item => item.PackageVersion == "fixture-v2");
+    }
+
     [Theory]
     [InlineData("\"command\":\"whoami\"")]
     [InlineData("\"solutions\":[\"whoami && del C:\\\\temp\\\\x\"]")]
@@ -197,6 +266,46 @@ public sealed class MilestoneThreeTests
     }
 
     [Fact]
+    public async Task AssessmentServiceComposesHtmlWithScoreEvidenceRecommendationsAndRepairHistory()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var run = new DiagnosticRun(Guid.NewGuid(), now.AddMinutes(-1), now, TimeSpan.FromMinutes(1), new ComputerInventory(),
+            CreateReport(Finding("Windows Update", "Sistema", "Evento observado", "Falha 0xAABBCCDD")));
+        var rule = Rule("fixture-rule", ["0xAABBCCDD"], [], KnowledgeImpact.High);
+        Assert.Single(new RecommendationEngine().Recommend(run.Report!, [rule]));
+        var knowledge = new InMemoryKnowledgeRepository([rule]);
+        var audit = new InMemoryRepairAuditLog();
+        await audit.SaveAsync(new RepairHistoryRecord(Guid.NewGuid(), "fixture.inert", "Proposta de teste", RepairExecutionStatus.Declined,
+            RepairRiskLevel.Low, false, false, now, now, "Ação recusada; nenhuma alteração."));
+        var service = new DiagnosticAssessmentService(knowledge, audit, new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
+
+        var html = await service.CreateHtmlReportAsync(run);
+
+        Assert.Contains("Health Score: 80", html);
+        Assert.Contains("Falha 0xAABBCCDD", html);
+        Assert.Contains("Regra de teste sem afirma&#231;&#227;o factual", html);
+        Assert.Contains("força do match literal", html);
+        Assert.Contains("Histórico de propostas de reparo", html);
+        Assert.Contains("Proposta de teste", html);
+        Assert.Contains("autoria autenticada", html);
+    }
+
+    [Fact]
+    public async Task AssessmentServiceExplicitlyReportsWhenKnowledgeBaseIsEmpty()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var run = new DiagnosticRun(Guid.NewGuid(), now.AddMinutes(-1), now, TimeSpan.FromMinutes(1), new ComputerInventory(),
+            CreateReport(Finding("Scanner", "Sistema", "Achado", "Evidência local")));
+        var service = new DiagnosticAssessmentService(new InMemoryKnowledgeRepository([]), new InMemoryRepairAuditLog(),
+            new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
+
+        var html = await service.CreateHtmlReportAsync(run);
+
+        Assert.Contains("Knowledge Base está vazia", html);
+        Assert.Contains("Nenhuma recomendação de conhecimento foi gerada", html);
+    }
+
+    [Fact]
     public void HtmlReportEscapesUntrustedTextAndIncludesScoreEvidenceRecommendationsAndActionHistory()
     {
         var malicious = "<script>alert('x')</script>";
@@ -231,6 +340,10 @@ public sealed class MilestoneThreeTests
         id, 1, "Fixture", "Regra de teste sem afirmação factual", impact, codes, symptoms,
         ["causa de teste"], ["solução descritiva de teste"], [new KnowledgeReference("Fonte de fixture", "https://example.invalid/docs")]);
 
+    private static string CreatePackageJson(string version, params KnowledgeRule[] rules) => JsonSerializer.Serialize(
+        new KnowledgePackage("1.0", version, "fixture local de teste", rules),
+        new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } });
+
     private const string ValidPackageJson = """
         {
           "schemaVersion": "1.0",
@@ -259,6 +372,12 @@ public sealed class MilestoneThreeTests
             Task.FromResult<IReadOnlyList<KnowledgeRule>>([]);
         public Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+    }
+
+    private sealed class InMemoryKnowledgeRepository(IReadOnlyList<KnowledgeRule> rules) : IKnowledgeRepository
+    {
+        public Task<IReadOnlyList<KnowledgeRule>> GetLatestRulesAsync(CancellationToken cancellationToken = default) => Task.FromResult(rules);
+        public Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class InMemoryRepairAuditLog : IRepairAuditLog

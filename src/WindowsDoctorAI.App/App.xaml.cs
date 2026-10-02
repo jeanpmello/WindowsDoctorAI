@@ -21,6 +21,8 @@ public partial class App : Application
     private IHost? _host;
     private MainWindow? _mainWindow;
 
+    internal MainWindow? MainWindow => _mainWindow;
+
     public App() => InitializeComponent();
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)

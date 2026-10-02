@@ -87,6 +87,36 @@
                 </Border>
             </Grid>
 
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+                <Border Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Base de conhecimento" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="{Binding KnowledgeBaseStatus}" TextWrapping="Wrap" />
+                        <Button Content="Selecionar pacote JSON local" Click="ChooseKnowledgePackage_Click" IsEnabled="{Binding CanSelectKnowledgePackage}" />
+                        <TextBlock Text="Revisão antes da importação" FontWeight="SemiBold" Margin="0,6,0,0" />
+                        <TextBlock Text="Versão" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBlock Text="{Binding PackageVersion}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Fonte declarada (não verificada)" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBlock Text="{Binding PackageSource}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="Total de regras" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBlock Text="{Binding PackageRuleCount}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="SHA-256 do conteúdo JSON (não comprova autoria)" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBlock Text="{Binding PackageSha256}" Style="{StaticResource FieldValueStyle}" />
+                        <TextBlock Text="{Binding PackageReviewStatus}" TextWrapping="Wrap" FontSize="12" />
+                        <TextBlock Text="O conteúdo é dado declarativo; importação não verifica autoria nem transforma afirmações em fatos. ‘High’ descreve força do match literal, não probabilidade de causa." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+                        <Button Content="Importar pacote revisado" Command="{Binding ImportKnowledgePackageCommand}" IsEnabled="{Binding CanImportKnowledgePackage}" Style="{StaticResource AccentButtonStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Relatório HTML local" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="Gera o relatório da execução atual ou mais recente carregada, com score, evidências, recomendações disponíveis e histórico de propostas de reparo." TextWrapping="Wrap" />
+                        <TextBlock Text="O arquivo é salvo no local escolhido. Conteúdo textual é escapado e o relatório não carrega scripts ou recursos remotos. Revise evidências sensíveis antes de compartilhar." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button Content="Gerar e salvar relatório HTML" Click="SaveHtmlReport_Click" IsEnabled="{Binding CanExportHtmlReport}" Style="{StaticResource AccentButtonStyle}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
             <TextBlock Text="Informações do computador" Style="{StaticResource SectionTitleStyle}" />
             <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="16">
                 <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource InventoryCardStyle}">

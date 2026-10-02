@@ -35,9 +35,24 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         return options;
     }
 
+    /// <summary>Valida o pacote e mostra seus metadados sem gravar regras no banco.</summary>
+    public KnowledgePackagePreview Preview(string json)
+    {
+        var (package, hash) = ParseAndValidate(json);
+        return new KnowledgePackagePreview(package.Version, package.Source, package.Rules.Count, hash);
+    }
+
     public async Task<KnowledgeImportResult> ImportAsync(string json, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(repository);
+        var (package, hash) = ParseAndValidate(json);
+        cancellationToken.ThrowIfCancellationRequested();
+        await repository.SaveImportAsync(package, hash, cancellationToken).ConfigureAwait(false);
+        return new KnowledgeImportResult(package.Version, package.Rules.Count, hash);
+    }
+
+    private static (KnowledgePackage Package, string Sha256) ParseAndValidate(string json)
+    {
         ArgumentNullException.ThrowIfNull(json);
         if (Encoding.UTF8.GetByteCount(json) is 0 or > MaximumPackageBytes)
             throw new InvalidDataException($"O pacote deve ter entre 1 byte e {MaximumPackageBytes} bytes.");
@@ -54,10 +69,8 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         }
 
         Validate(package);
-        cancellationToken.ThrowIfCancellationRequested();
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
-        await repository.SaveImportAsync(package, hash, cancellationToken).ConfigureAwait(false);
-        return new KnowledgeImportResult(package.Version, package.Rules.Count, hash);
+        return (package, hash);
     }
 
     private static void Validate(KnowledgePackage package)
@@ -74,7 +87,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var rule in package.Rules)
         {
-            if (rule is null || !SafeIdentifier.IsMatch(rule.Id) || rule.Version is < 1 or > 1_000_000)
+            if (rule is null || rule.Id is null || !SafeIdentifier.IsMatch(rule.Id) || rule.Version is < 1 or > 1_000_000)
                 throw new InvalidDataException("Cada regra precisa de id seguro e version inteira entre 1 e 1000000.");
             if (!seen.Add($"{rule.Id}:{rule.Version}"))
                 throw new InvalidDataException($"Regra duplicada: {rule.Id} v{rule.Version}.");
@@ -114,3 +127,4 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
 }
 
 public sealed record KnowledgeImportResult(string Version, int ImportedRules, string Sha256);
+public sealed record KnowledgePackagePreview(string Version, string Source, int RuleCount, string Sha256);

@@ -12,6 +12,9 @@ namespace WindowsDoctorAI.App;
 public partial class HomeViewModel(
     RunComputerInventoryDiagnosticUseCase runDiagnostic,
     IDiagnosticRunRepository history,
+    IKnowledgeRepository knowledgeRepository,
+    KnowledgeJsonImporter knowledgeImporter,
+    DiagnosticAssessmentService assessmentService,
     ILogger<HomeViewModel> logger) : ObservableObject
 {
     private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
@@ -44,10 +47,145 @@ public partial class HomeViewModel(
     [ObservableProperty] private string _iPv4 = "Não coletado";
     [ObservableProperty] private string _iPv6 = "Não coletado";
     [ObservableProperty] private string _networkAdapters = "Não coletado";
+    [ObservableProperty] private string _knowledgeBaseStatus = "A base de conhecimento ainda não foi verificada.";
+    [ObservableProperty] private string _packageVersion = "—";
+    [ObservableProperty] private string _packageSource = "—";
+    [ObservableProperty] private string _packageRuleCount = "—";
+    [ObservableProperty] private string _packageSha256 = "—";
+    [ObservableProperty] private string _packageReviewStatus = "Selecione um pacote JSON para validar e revisar os metadados antes da importação.";
+    [ObservableProperty] private bool _canImportKnowledgePackage;
+    [ObservableProperty] private bool _canExportHtmlReport;
+    [ObservableProperty] private bool _isImportingPackage;
+    [ObservableProperty] private bool _canSelectKnowledgePackage = true;
 
-    partial void OnIsScanningChanged(bool value) => StartDiagnosticCommand.NotifyCanExecuteChanged();
+    private string? _pendingPackageJson;
+    private DiagnosticRun? _currentRun;
+
+    partial void OnIsScanningChanged(bool value)
+    {
+        StartDiagnosticCommand.NotifyCanExecuteChanged();
+        UpdateImportCommandState();
+    }
+
+    partial void OnIsImportingPackageChanged(bool value)
+    {
+        CanSelectKnowledgePackage = !value;
+        UpdateImportCommandState();
+    }
 
     private bool CanStartDiagnostic() => !IsScanning;
+    private bool CanImportKnowledge() => _pendingPackageJson is not null && !IsImportingPackage && !IsScanning;
+
+    private void UpdateImportCommandState()
+    {
+        CanImportKnowledgePackage = CanImportKnowledge();
+        ImportKnowledgePackageCommand.NotifyCanExecuteChanged();
+    }
+
+    public Task PreviewKnowledgePackageAsync(string json)
+    {
+        try
+        {
+            var preview = knowledgeImporter.Preview(json);
+            _pendingPackageJson = json;
+            PackageVersion = preview.Version;
+            PackageSource = preview.Source;
+            PackageRuleCount = preview.RuleCount.ToString(CultureInfo.InvariantCulture);
+            PackageSha256 = preview.Sha256;
+            PackageReviewStatus = "Pacote válido para revisão. A fonte/autoria não foi verificada; revise os metadados antes de importar.";
+            StatusMessage = "Pacote validado sem gravação. A importação só ocorre quando você selecionar Importar.";
+        }
+        catch (Exception exception)
+        {
+            ShowPackagePreviewError(exception.Message);
+            logger.LogWarning(exception, "O pacote local de conhecimento foi recusado na prévia.");
+        }
+
+        UpdateImportCommandState();
+        return Task.CompletedTask;
+    }
+
+    public void ShowPackagePreviewError(string message)
+    {
+        _pendingPackageJson = null;
+        PackageVersion = "—";
+        PackageSource = "—";
+        PackageRuleCount = "—";
+        PackageSha256 = "—";
+        PackageReviewStatus = $"Pacote recusado antes da importação: {message}";
+        UpdateImportCommandState();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanImportKnowledge))]
+    private async Task ImportKnowledgePackageAsync()
+    {
+        if (_pendingPackageJson is not { } json) return;
+        IsImportingPackage = true;
+        try
+        {
+            var imported = await knowledgeImporter.ImportAsync(json);
+            _pendingPackageJson = null;
+            await RefreshKnowledgeBaseStatusAsync();
+            PackageReviewStatus = $"Importação concluída: {imported.ImportedRules} regra(s), versão {imported.Version}. Pacote e fonte continuam não verificados quanto à autoria.";
+            StatusMessage = "Pacote importado localmente; a importação não autentica a autoria nem comprova as afirmações das regras.";
+        }
+        catch (Exception exception)
+        {
+            _pendingPackageJson = null;
+            PackageReviewStatus = $"Importação recusada sem gravação parcial: {exception.Message}";
+            StatusMessage = "O pacote foi recusado. Nenhuma importação parcial foi mantida.";
+            logger.LogWarning(exception, "O pacote local de conhecimento foi recusado durante a importação.");
+        }
+        finally
+        {
+            IsImportingPackage = false;
+            UpdateImportCommandState();
+        }
+    }
+
+    private async Task RefreshKnowledgeBaseStatusAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken);
+            KnowledgeBaseStatus = rules.Count == 0
+                ? "Base de conhecimento vazia: nenhum pacote importado; não haverá recomendações baseadas em regras."
+                : $"{rules.Count} regra(s) disponíveis localmente. Pacotes e fontes declaradas não são autenticados pelo aplicativo.";
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Não foi possível consultar a base de conhecimento local.");
+            KnowledgeBaseStatus = "Não foi possível verificar o estado da base de conhecimento local.";
+        }
+    }
+
+    public async Task<string?> CreateCurrentHtmlReportAsync(CancellationToken cancellationToken = default)
+    {
+        if (_currentRun is null)
+        {
+            StatusMessage = "Não há uma execução carregada para gerar o relatório.";
+            return null;
+        }
+
+        try
+        {
+            var html = await assessmentService.CreateHtmlReportAsync(_currentRun, cancellationToken);
+            StatusMessage = "Relatório HTML preparado localmente. Escolha onde salvar o arquivo.";
+            return html;
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Não foi possível gerar o relatório HTML local.");
+            StatusMessage = "Não foi possível gerar o relatório HTML local.";
+            return null;
+        }
+    }
+
+    public void ReportHtmlSaved(string path) =>
+        StatusMessage = $"Relatório HTML salvo localmente como {Path.GetFileName(path)}. Verifique evidências sensíveis antes de compartilhá-lo.";
+
+    public void ReportHtmlSaveFailed(string message) =>
+        StatusMessage = $"Não foi possível salvar o relatório HTML: {message}";
 
     [RelayCommand(CanExecute = nameof(CanStartDiagnostic))]
     private async Task StartDiagnosticAsync()
@@ -57,6 +195,8 @@ public partial class HomeViewModel(
         try
         {
             var outcome = await runDiagnostic.ExecuteAsync();
+            _currentRun = outcome.Run;
+            CanExportHtmlReport = true;
             DisplayInventory(outcome.Run.Inventory);
             DisplayReport(outcome.Run.Report, outcome.Run.Duration);
             LastDiagnosticText = $"Concluído às {outcome.Run.CompletedAtUtc.ToLocalTime():G}";
@@ -77,10 +217,13 @@ public partial class HomeViewModel(
 
     public async Task LoadLatestAsync(CancellationToken cancellationToken = default)
     {
+        await RefreshKnowledgeBaseStatusAsync(cancellationToken);
         try
         {
             var latest = await history.GetLatestAsync(cancellationToken);
             if (latest is null) return;
+            _currentRun = latest;
+            CanExportHtmlReport = true;
             DisplayInventory(latest.Inventory);
             DisplayReport(latest.Report, latest.Duration);
             LastDiagnosticText = $"Concluído às {latest.CompletedAtUtc.ToLocalTime():G}";
