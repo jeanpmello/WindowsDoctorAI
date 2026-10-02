@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using WindowsDoctorAI.Application;
 using WindowsDoctorAI.Core;
-using WindowsDoctorAI.Diagnostics;
 using WindowsDoctorAI.Domain;
 using WindowsDoctorAI.Reporting;
 
@@ -13,7 +12,7 @@ public sealed class KnowledgePilotPackTests
     private const string PilotPackPath = "knowledge-packs/microsoft-windows-update-pilot.json";
 
     [Fact]
-    public void PilotPackPreviewValidatesThreeRulesWithoutImportingThem()
+    public void PilotPackPreviewValidatesTwoRulesWithoutImportingThem()
     {
         var json = ReadPilotPack();
         var importer = new KnowledgeJsonImporter(new InMemoryKnowledgeRepository());
@@ -21,9 +20,11 @@ public sealed class KnowledgePilotPackTests
         var preview = importer.Preview(json);
         var package = DeserializePackage(json);
 
-        Assert.Equal("microsoft-windows-pilot-2026-10-02-v3", preview.Version);
-        Assert.Equal(3, preview.RuleCount);
-        Assert.Equal(3, package.Rules.Count);
+        Assert.Equal("microsoft-windows-pilot-2026-10-02-v4", preview.Version);
+        Assert.Equal(2, preview.RuleCount);
+        Assert.Equal(2, package.Rules.Count);
+        Assert.DoesNotContain(package.Rules,
+            rule => string.Equals(rule.Match?.ExactErrorCode, "0x800F0831", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("curadoria de primeira parte", preview.Source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("não autenticados criptograficamente", preview.Source, StringComparison.OrdinalIgnoreCase);
         Assert.All(package.Rules, rule =>
@@ -65,12 +66,11 @@ public sealed class KnowledgePilotPackTests
                 $"\"requiredContextTerms\": [{elevenContextTerms}]",
                 StringComparison.Ordinal),
             json.Replace("\"exactErrorCode\": \"0xC1900107\"", "\"exactErrorCode\": \"0xC190107\"", StringComparison.Ordinal),
+            json.Replace("\"exactErrorCode\": \"0xC1900107\"", "\"exactErrorCode\": \"0x800F0831\"", StringComparison.Ordinal),
             json.Replace("\"requiredEvidence\": [", "\"command\": \"shutdown /r\", \"requiredEvidence\": [", StringComparison.Ordinal),
             json.Replace("\"requiredEvidence\": [", "\"script\": \"ignored\", \"requiredEvidence\": [", StringComparison.Ordinal),
             json.Replace("\"requiredSourceProviders\": [\"WindowsUpdateClient\"]", "\"requiredSourceProviders\": [\"UnknownProvider\"]", StringComparison.Ordinal),
-            json.Replace("\"schemaVersion\": \"1.3\"", "\"schemaVersion\": \"1.2\"", StringComparison.Ordinal),
-            json.Replace("\"requiredEvidenceTypes\": [\"ManifestMissing\", \"FailedToResolvePackage\"]", "\"requiredEvidenceTypes\": []", StringComparison.Ordinal),
-            json.Replace("\"isModifying\": false", "\"isModifying\": true", StringComparison.Ordinal),
+            json.Replace("\"manualOnly\": true", "\"manualOnly\": false", StringComparison.Ordinal),
             json.Replace("Confirme o código exato e o contexto de Windows Setup no mesmo achado. Não aplique esta regra a um código isolado ou ocorrido em outro contexto.", "execute script document", StringComparison.Ordinal),
             json.Replace("Confirme o código exato e o contexto de Windows Setup no mesmo achado. Não aplique esta regra a um código isolado ou ocorrido em outro contexto.", "shutdown /r", StringComparison.Ordinal),
             json.Replace("Ação manual, elevada e modificadora: siga o procedimento DISM documentado pela Microsoft. Execute System File Checker (SFC) somente se DISM concluir com sucesso. Se DISM falhar, não prossiga para SFC. Preserve e inspecione CBS.log.", "DISM.exe /Online /Cleanup-Image", StringComparison.Ordinal)
@@ -107,52 +107,31 @@ public sealed class KnowledgePilotPackTests
     }
 
     [Fact]
-    public void Error800f0831RuleRequiresCorrelatedTypedEvidenceAndIsDiagnosticOnly()
+    public void Error800f0831IsRemovedFromPackRejectedOnImportAndNeverRecommended()
     {
-        var package = DeserializePackage(ReadPilotPack());
-        var cbsRule = Assert.Single(package.Rules, rule => rule.Match!.ExactErrorCode == "0x800F0831");
-        Assert.Equal(["ManifestMissing", "FailedToResolvePackage"], cbsRule.Match!.RequiredEvidenceTypes);
-        Assert.Equal(["WindowsUpdateClient"], cbsRule.Match.RequiredSourceProviders);
-        Assert.False(cbsRule.Procedure!.IsModifying);
-        Assert.False(cbsRule.Procedure.RequiresElevation);
-        Assert.True(cbsRule.Procedure.ManualOnly);
-        Assert.True(cbsRule.Procedure.RequiresUserConfirmation);
-        Assert.Contains("não fornece nem executa reparo", cbsRule.Procedure.CorrectiveAction, StringComparison.OrdinalIgnoreCase);
+        var pilotText = ReadPilotPack();
+        var pilot = DeserializePackage(pilotText);
+        Assert.DoesNotContain(pilot.Rules,
+            rule => string.Equals(rule.Match?.ExactErrorCode, "0x800F0831", StringComparison.OrdinalIgnoreCase));
 
-        const string packageIdentity = "Package_123_for_KB3192392~31bf3856ad364e35~amd64~~6.3.1.4";
-        var eventTimestamp = DateTimeOffset.UtcNow;
-        var cbsTime = eventTimestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
-        var sourceText = $"{cbsTime}, Info CBS Store corruption, manifest missing for package: {packageIdentity}\n";
-        var windowsUpdateEvent = new DiagnosticEvent(20,
-            WindowsUpdateCbsLogAnalyzer.WindowsUpdateOperationalChannel,
-            "Microsoft-Windows-WindowsUpdateClient", 2, eventTimestamp,
-            "Update failed with HRESULT 0x800F0831.");
-        var diagnostic = new WindowsUpdateCbsLogAnalyzer().Analyze(sourceText, windowsUpdateEvent);
-        Assert.NotNull(diagnostic);
+        var importer = new KnowledgeJsonImporter(new InMemoryKnowledgeRepository());
+        Assert.Throws<InvalidDataException>(() => importer.Preview(pilotText.Replace(
+            "\"exactErrorCode\": \"0xC1900107\"", "\"exactErrorCode\": \"0x800F0831\"", StringComparison.Ordinal)));
+        Assert.Throws<InvalidDataException>(() => importer.Preview(CreateLegacyPackage(1)
+            .Replace("\"errorCodes\":[]", "\"errorCodes\":[\"0x800F0831\"]", StringComparison.Ordinal)));
 
+        var legacyRule = new KnowledgeRule("legacy-800f", 1, "Windows Update", "Código legado",
+            KnowledgeImpact.Moderate, ["0x800F0831"], [], [], [],
+            [new KnowledgeReference("Fixture", "https://example.invalid/docs")]);
+        var strictRule = new KnowledgeRule("strict-800f", 1, "Windows Update", "Código estrito",
+            KnowledgeImpact.Moderate, [], [], [], [], [new KnowledgeReference("Fixture", "https://example.invalid/docs")],
+            "Contexto CBS", new KnowledgeMatchCondition("0x800F0831", ["Windows Update"], ["CBS marker="]));
+        var finding = Finding("Windows Update", "CBS marker=ManifestMissing; erro 0x800F0831",
+            DiagnosticSourceMetadata.FromEventProvider("Microsoft-Windows-WindowsUpdateClient"));
         var engine = new RecommendationEngine();
-        Assert.Null(diagnostic!.CbsEvidence?.PackageIdentity);
-        Assert.Empty(engine.Recommend(CreateReport(diagnostic), [cbsRule]));
-        Assert.Empty(engine.Recommend(CreateReport(Finding("Windows Update",
-            "0x800F0831 CBS marker=ManifestMissing; package identity=" + packageIdentity,
-            DiagnosticSourceMetadata.FromEventProvider("Microsoft-Windows-WindowsUpdateClient"))), [cbsRule]));
-        Assert.Empty(engine.Recommend(CreateReport(diagnostic! with
-        {
-            WindowsUpdateEventEvidence = new WindowsUpdateEventEvidence("System", "0x800F0831")
-        }), [cbsRule]));
-        Assert.Empty(engine.Recommend(CreateReport(diagnostic! with
-        {
-            CbsEvidence = new CbsPackageEvidence(CbsEvidenceType.ManifestMissing, "C:\\Sensitive\\private.cab")
-        }), [cbsRule]));
-        Assert.Empty(engine.Recommend(CreateReport(diagnostic! with
-        {
-            Evidence = $"CBS marker=FailedToResolvePackage; package identity={packageIdentity}"
-        }), [cbsRule]));
-        Assert.Empty(engine.Recommend(CreateReport(diagnostic! with
-        {
-            CbsEvidence = new CbsPackageEvidence(CbsEvidenceType.ManifestMissing,
-                "Package_456_for_KB3192392~31bf3856ad364e35~amd64~~6.3.1.4")
-        }), [cbsRule]));
+        Assert.Empty(engine.Recommend(CreateReport(finding), [legacyRule]));
+        Assert.Empty(engine.Recommend(CreateReport(finding), [strictRule]));
+        Assert.Empty(engine.Recommend(CreateReport(), [legacyRule, strictRule]));
     }
 
     [Fact]

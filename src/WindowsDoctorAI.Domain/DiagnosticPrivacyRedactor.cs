@@ -139,17 +139,7 @@ public static class DiagnosticPrivacyRedactor
                 ? "Revise o evento na fonte do Windows; o texto original foi omitido por privacidade."
                 : RedactText(result.Recommendation, inventory),
             Evidence = containsRawEventMessage ? RedactEventEvidence(result.Evidence) : RedactText(result.Evidence, inventory),
-            SourceMetadata = sourceMetadata,
-            CbsEvidence = result.CbsEvidence is { } cbsEvidence
-                && Enum.IsDefined(cbsEvidence.Type)
-                && (cbsEvidence.PackageIdentity is null || CbsPackageIdentityValidator.IsValid(cbsEvidence.PackageIdentity))
-                    ? cbsEvidence
-                    : null,
-            WindowsUpdateEventEvidence = sourceMetadata is not null
-                && result.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true }
-                    ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel,
-                        WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, result.WindowsUpdateEventEvidence.EventTimestamp)
-                    : null
+            SourceMetadata = sourceMetadata
         };
     }
 

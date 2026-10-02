@@ -63,7 +63,7 @@
             <Border Style="{StaticResource InventoryCardStyle}">
                 <StackPanel Spacing="8">
                     <TextBlock Text="Análise manual de CBS.log" Style="{StaticResource SectionTitleStyle}" />
-                    <TextBlock Text="Selecione um arquivo .log após uma execução diagnóstica atual com o evento WindowsUpdateClient/Operational 0x800F0831. O limite é 2 MiB; o conteúdo é lido somente em memória e não é salvo." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="Selecione manualmente um CBS.log para uma observação offline independente. Nenhum evento ou atualização será associado; conteúdo lido somente em memória (limite 2 MiB), sem gravação, histórico, exportação ou recomendação." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <StackPanel Orientation="Horizontal" Spacing="12">
                         <Button Content="Selecionar CBS.log e analisar" Command="{Binding AnalyzeCbsLogCommand}" IsEnabled="{Binding CanAnalyzeCbsLog}" />
                         <ProgressRing IsActive="{Binding IsAnalyzingCbsLog}" Width="22" Height="22" />
@@ -71,11 +71,7 @@
                     <TextBlock Text="{Binding CbsLogAnalysisStatus}" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding CbsLogSource}" TextWrapping="Wrap" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding CbsLogSignal}" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding CbsLogRecommendation}" TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="16">
-                        <HyperlinkButton Content="Documentação Microsoft: erro 0x800F0831" NavigateUri="https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/error-0x800f0831-installing-update" />
-                        <HyperlinkButton Content="Solução de problemas de Windows Update" NavigateUri="https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/troubleshoot-windows-update-installation-error-corruption" />
-                    </StackPanel>
+                    <TextBlock Text="{Binding CbsLogDisclaimer}" TextWrapping="Wrap" FontWeight="SemiBold" />
                 </StackPanel>
             </Border>
 

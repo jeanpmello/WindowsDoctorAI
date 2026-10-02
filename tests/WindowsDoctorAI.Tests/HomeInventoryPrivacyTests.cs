@@ -63,7 +63,7 @@ public sealed class HomeInventoryPrivacyTests
             knowledge, new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
         var viewModel = new HomeViewModel(
             useCase, history, knowledge, new KnowledgeJsonImporter(knowledge), assessment,
-            new CbsLogImportService(new NoCbsLogPicker(), new WindowsUpdateCbsLogAnalyzer()),
+            new CbsLogImportService(new NoCbsLogPicker(), new CbsLogMarkerClassifier()),
             NullLogger<HomeViewModel>.Instance);
 
         DiagnosticRun originalRun;

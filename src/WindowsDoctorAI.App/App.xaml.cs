@@ -47,7 +47,7 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                     services.AddWindowsDoctorInfrastructure(databasePath);
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();
                     services.AddTransient<RunComputerInventoryDiagnosticUseCase>();
-                    services.AddSingleton<IWindowsUpdateCbsLogAnalyzer, WindowsUpdateCbsLogAnalyzer>();
+                    services.AddSingleton<ICbsLogMarkerClassifier, CbsLogMarkerClassifier>();
                     services.AddTransient<CbsLogImportService>();
                     services.AddTransient<ICbsLogFilePicker>(_ => new WinUiCbsLogFilePicker(() =>
                         _mainWindow is null

@@ -38,10 +38,10 @@ public interface ICbsLogFilePicker
     Task<Stream?> PickCbsLogAsync(CancellationToken cancellationToken = default);
 }
 
-/// <summary>Analisa conteúdo em memória somente quando recebe evidência tipada do evento da execução atual.</summary>
-public interface IWindowsUpdateCbsLogAnalyzer
+/// <summary>Classifica tipos genéricos de marcadores CBS sem correlacioná-los a eventos ou pacotes.</summary>
+public interface ICbsLogMarkerClassifier
 {
-    DiagnosticResult? AnalyzeWithCurrentRunEvent(string? cbsLogText, WindowsUpdateEventEvidence? eventEvidence);
+    IReadOnlyList<CbsMarkerType> Classify(string? cbsLogText);
 }
 
 public interface IDiagnosticRunRepository

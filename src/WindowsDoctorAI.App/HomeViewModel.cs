@@ -58,16 +58,15 @@ internal partial class HomeViewModel(
     [ObservableProperty] private bool _canExportHtmlReport;
     [ObservableProperty] private bool _canAnalyzeCbsLog;
     [ObservableProperty] private bool _isAnalyzingCbsLog;
-    [ObservableProperty] private string _cbsLogAnalysisStatus = "Execute um diagnóstico nesta sessão para habilitar a análise de um CBS.log selecionado.";
+    [ObservableProperty] private string _cbsLogAnalysisStatus = "Selecione manualmente um CBS.log para uma observação offline e isolada.";
     [ObservableProperty] private string _cbsLogSource = string.Empty;
     [ObservableProperty] private string _cbsLogSignal = string.Empty;
-    [ObservableProperty] private string _cbsLogRecommendation = string.Empty;
+    [ObservableProperty] private string _cbsLogDisclaimer = string.Empty;
     [ObservableProperty] private bool _isImportingPackage;
     [ObservableProperty] private bool _canSelectKnowledgePackage = true;
 
     private string? _pendingPackageJson;
     private DiagnosticRun? _currentRun;
-    private bool _currentRunWasExecutedThisSession;
 
     partial void OnIsScanningChanged(bool value)
     {
@@ -96,9 +95,7 @@ internal partial class HomeViewModel(
     private void UpdateCbsLogCommandState()
     {
         CanAnalyzeCbsLog = !IsScanning
-            && !IsAnalyzingCbsLog
-            && _currentRunWasExecutedThisSession
-            && CbsLogImportService.HasCurrentRunEvent(_currentRun);
+            && !IsAnalyzingCbsLog;
         AnalyzeCbsLogCommand.NotifyCanExecuteChanged();
     }
 
@@ -109,7 +106,7 @@ internal partial class HomeViewModel(
         CbsLogAnalysisStatus = status;
         CbsLogSource = string.Empty;
         CbsLogSignal = string.Empty;
-        CbsLogRecommendation = string.Empty;
+        CbsLogDisclaimer = string.Empty;
     }
 
     public Task PreviewKnowledgePackageAsync(string json)
@@ -224,8 +221,7 @@ internal partial class HomeViewModel(
         ResetCbsLogAnalysis("Aguardando a seleção do arquivo; o conteúdo será analisado somente em memória.");
         try
         {
-            var outcome = await cbsLogImportService.ImportAndAnalyzeAsync(
-                _currentRunWasExecutedThisSession ? _currentRun : null);
+            var outcome = await cbsLogImportService.ImportAndAnalyzeAsync();
             switch (outcome.Status)
             {
                 case CbsLogImportStatus.Cancelled:
@@ -240,22 +236,19 @@ internal partial class HomeViewModel(
                 case CbsLogImportStatus.UnsupportedEncoding:
                     ResetCbsLogAnalysis("Codificação inválida ou não suportada. Use UTF-8 (com ou sem BOM) ou UTF-16 com BOM.");
                     break;
-                case CbsLogImportStatus.NoCurrentRunEvent:
-                    ResetCbsLogAnalysis("A execução diagnóstica atual não contém o evento operacional WindowsUpdateClient com 0x800F0831; nenhum achado foi produzido.");
+                case CbsLogImportStatus.NoRecognizedMarker:
+                    ResetCbsLogAnalysis("Nenhum marcador CBS reconhecido; nenhum resultado foi gerado.");
                     break;
-                case CbsLogImportStatus.NoRecognizedEvidence:
-                    ResetCbsLogAnalysis("Não foi reconhecido um marcador CBS com timestamp no mesmo segundo local do evento; nenhum achado foi produzido.");
-                    break;
-                case CbsLogImportStatus.Finding when outcome.Result?.CbsEvidence is { } cbsEvidence:
-                    CbsLogAnalysisStatus = "Evidência reconhecida em memória. O texto original não foi retido.";
-                    CbsLogSource = "Origem: CBS.log importado";
-                    CbsLogSignal = cbsEvidence.Type switch
+                case CbsLogImportStatus.ObservationAvailable when outcome.MarkerTypes is { Count: > 0 } markerTypes:
+                    CbsLogAnalysisStatus = "Observação CBS isolada exibida temporariamente; nenhum achado ou recomendação foi criado.";
+                    CbsLogSource = "Origem: CBS.log selecionado manualmente (somente leitura)";
+                    CbsLogSignal = "Tipos genéricos: " + string.Join(", ", markerTypes.Select(markerType => markerType switch
                     {
-                        CbsEvidenceType.ManifestMissing => "Sinal: marcador de manifesto ausente reconhecido.",
-                        CbsEvidenceType.FailedToResolvePackage => "Sinal: marcador de pacote não resolvido reconhecido.",
-                        _ => "Sinal CBS reconhecido."
-                    };
-                    CbsLogRecommendation = outcome.Result.Recommendation;
+                        CbsMarkerType.ManifestMissing => "marcador de manifesto ausente",
+                        CbsMarkerType.FailedToResolvePackage => "marcador de falha ao resolver pacote",
+                        _ => "marcador CBS reconhecido"
+                    }));
+                    CbsLogDisclaimer = "não atribuída ao evento; não confirma causa; não acionável.";
                     break;
                 default:
                     ResetCbsLogAnalysis("Não foi possível produzir um resultado CBS seguro.");
@@ -271,8 +264,7 @@ internal partial class HomeViewModel(
     [RelayCommand(CanExecute = nameof(CanStartDiagnostic))]
     private async Task StartDiagnosticAsync()
     {
-        _currentRunWasExecutedThisSession = false;
-        ResetCbsLogAnalysis("Execute um diagnóstico nesta sessão para habilitar a análise de um CBS.log selecionado.");
+        ResetCbsLogAnalysis("A observação CBS é independente do diagnóstico e não será associada a evento algum.");
         UpdateCbsLogCommandState();
         IsScanning = true;
         StatusMessage = "Coletando inventário e verificações locais somente de leitura. Nenhuma correção será aplicada.";
@@ -280,11 +272,7 @@ internal partial class HomeViewModel(
         {
             var outcome = await runDiagnostic.ExecuteAsync();
             _currentRun = outcome.Run;
-            _currentRunWasExecutedThisSession = true;
             UpdateCbsLogCommandState();
-            CbsLogAnalysisStatus = CbsLogImportService.HasCurrentRunEvent(outcome.Run)
-                ? "A execução atual contém o evento necessário; o filtro de mesmo segundo local não prova que CBS e evento sejam da mesma atualização."
-                : "A execução atual não contém o evento operacional WindowsUpdateClient com 0x800F0831; não haverá recomendação CBS.";
             CanExportHtmlReport = true;
             DisplayInventory(outcome.Run.Inventory);
             DisplayReport(outcome.Run.Report, outcome.Run.Duration, outcome.Run.Inventory);
@@ -307,8 +295,7 @@ internal partial class HomeViewModel(
 
     public async Task LoadLatestAsync(CancellationToken cancellationToken = default)
     {
-        _currentRunWasExecutedThisSession = false;
-        ResetCbsLogAnalysis("A análise de CBS.log exige uma execução diagnóstica iniciada nesta sessão.");
+        ResetCbsLogAnalysis("Selecione manualmente um CBS.log para uma observação offline e isolada.");
         UpdateCbsLogCommandState();
         await RefreshKnowledgeBaseStatusAsync(cancellationToken);
         try

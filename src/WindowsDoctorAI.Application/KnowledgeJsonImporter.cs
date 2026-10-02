@@ -113,8 +113,9 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             ValidateList(rule.Symptoms, "symptoms", rule.Id, 50, 300);
             ValidateList(rule.Causes, "causes", rule.Id, 50, 1000);
             ValidateList(rule.Solutions, "solutions", rule.Id, 50, 1000);
-            if (rule.Match is null && rule.ErrorCodes.Concat(rule.Symptoms).Any(value => CbsStoreCorruptionCode.IsMatch(value)))
-                throw new InvalidDataException("0x800F0831 não pode usar correspondência legada por código/sintoma; exige evidência CBS tipada no schema 1.3.");
+            if (CbsStoreCorruptionCode.IsMatch(rule.Match?.ExactErrorCode ?? string.Empty)
+                || rule.ErrorCodes.Concat(rule.Symptoms).Any(value => CbsStoreCorruptionCode.IsMatch(value)))
+                throw new InvalidDataException("0x800F0831 está temporariamente desativado: não há chave de correlação confiável para associar eventos e marcadores CBS.");
             if (rule.References is null || rule.References.Count is 0 or > 50)
                 throw new InvalidDataException($"A regra {rule.Id} deve ter entre 1 e 50 referências declaradas.");
             foreach (var reference in rule.References)
@@ -161,7 +162,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             if (!structuredEvidenceSchema)
                 throw new InvalidDataException($"A regra {rule.Id} usa tipos de evidência estruturada, disponíveis somente no schema 1.3.");
             ValidateRequiredConditions(evidenceTypes, "match.requiredEvidenceTypes", rule.Id, 80);
-            var knownEvidenceTypes = Enum.GetNames<CbsEvidenceType>();
+            var knownEvidenceTypes = Enum.GetNames<CbsMarkerType>();
             if (evidenceTypes.Any(value => !knownEvidenceTypes.Contains(value, StringComparer.Ordinal)))
                 throw new InvalidDataException($"A regra {rule.Id} declara tipo de evidência estruturada desconhecido.");
         }
@@ -195,15 +196,6 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             || !rule.Procedure.Rollback.Contains("indisponível", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("A regra 0x80073712 precisa permanecer privilegiada, modificadora e sem rollback disponível.");
 
-        if (string.Equals(rule.Match.ExactErrorCode, "0x800F0831", StringComparison.OrdinalIgnoreCase)
-            && (!structuredEvidenceSchema
-                || evidenceTypes.Count == 0
-                || !sourceProviders.Contains(DiagnosticSourceMetadata.WindowsUpdateClientProvider, StringComparer.Ordinal)
-                || !rule.Match.ScannerNames.Contains("Windows Update", StringComparer.Ordinal)
-                || !contextTerms.Contains("CBS marker=", StringComparer.Ordinal)
-                || rule.Procedure.IsModifying
-                || rule.Procedure.RequiresElevation))
-            throw new InvalidDataException("A regra 0x800F0831 exige evidência CBS tipada no schema 1.3, provider WindowsUpdateClient e orientação somente diagnóstica.");
     }
 
     private static void ValidateRequiredConditions(IReadOnlyList<string>? values, string field, string ruleId, int maximumLength)

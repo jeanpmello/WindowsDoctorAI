@@ -11,21 +11,21 @@ internal enum CbsLogImportStatus
     FileReadFailed,
     FileTooLarge,
     UnsupportedEncoding,
-    NoCurrentRunEvent,
-    NoRecognizedEvidence,
-    Finding
+    NoRecognizedMarker,
+    ObservationAvailable
 }
 
-/// <summary>Saída transitória: contém apenas estado ou resultado tipado, nunca arquivo, caminho ou texto bruto.</summary>
-internal sealed record CbsLogImportOutcome(CbsLogImportStatus Status, DiagnosticResult? Result = null);
+/// <summary>Saída transitória com status e tipos genéricos; não contém evento, pacote, caminho ou texto bruto.</summary>
+internal sealed record CbsLogImportOutcome(
+    CbsLogImportStatus Status,
+    IReadOnlyList<CbsMarkerType>? MarkerTypes = null);
 
-/// <summary>Coordena seleção e análise limitada de CBS.log sem gravar conteúdo ou registrar exceções.</summary>
+/// <summary>Coordena leitura manual limitada e classificação em memória, sem gravação ou logging do conteúdo.</summary>
 internal sealed class CbsLogImportService(
     ICbsLogFilePicker filePicker,
-    IWindowsUpdateCbsLogAnalyzer analyzer)
+    ICbsLogMarkerClassifier classifier)
 {
     public const int MaximumFileBytes = 2 * 1024 * 1024;
-    private static readonly TimeSpan MaximumRunAge = TimeSpan.FromMinutes(15);
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private static readonly UnicodeEncoding StrictUtf16LittleEndian = new(false, true, true);
@@ -36,15 +36,8 @@ internal sealed class CbsLogImportService(
     private static readonly byte[] Utf32LittleEndianBom = [0xFF, 0xFE, 0x00, 0x00];
     private static readonly byte[] Utf32BigEndianBom = [0x00, 0x00, 0xFE, 0xFF];
 
-    public static bool HasCurrentRunEvent(DiagnosticRun? run) => FindCurrentRunEvent(run) is not null;
-
-    public async Task<CbsLogImportOutcome> ImportAndAnalyzeAsync(
-        DiagnosticRun? currentRun,
-        CancellationToken cancellationToken = default)
+    public async Task<CbsLogImportOutcome> ImportAndAnalyzeAsync(CancellationToken cancellationToken = default)
     {
-        var eventEvidence = FindCurrentRunEvent(currentRun);
-        if (eventEvidence is null) return new CbsLogImportOutcome(CbsLogImportStatus.NoCurrentRunEvent);
-
         var buffer = new byte[MaximumFileBytes + 1];
         Stream? stream = null;
         try
@@ -68,10 +61,10 @@ internal sealed class CbsLogImportService(
             if (!TryDecode(buffer.AsSpan(0, totalBytes), out var decodedText))
                 return new CbsLogImportOutcome(CbsLogImportStatus.UnsupportedEncoding);
 
-            var result = analyzer.AnalyzeWithCurrentRunEvent(decodedText, eventEvidence);
-            return result is null
-                ? new CbsLogImportOutcome(CbsLogImportStatus.NoRecognizedEvidence)
-                : new CbsLogImportOutcome(CbsLogImportStatus.Finding, result);
+            var markerTypes = classifier.Classify(decodedText);
+            return markerTypes.Count == 0
+                ? new CbsLogImportOutcome(CbsLogImportStatus.NoRecognizedMarker)
+                : new CbsLogImportOutcome(CbsLogImportStatus.ObservationAvailable, markerTypes);
         }
         catch (OperationCanceledException)
         {
@@ -91,35 +84,6 @@ internal sealed class CbsLogImportService(
             }
             CryptographicOperations.ZeroMemory(buffer);
         }
-    }
-
-    private static WindowsUpdateEventEvidence? FindCurrentRunEvent(DiagnosticRun? run)
-    {
-        if (!IsFreshWellFormedRun(run)) return null;
-
-        var result = run?.Report?.Results.FirstOrDefault(candidate =>
-            candidate.Status == DiagnosticStatus.Finding
-            && string.Equals(candidate.ScannerName, "Windows Update", StringComparison.OrdinalIgnoreCase)
-            && DiagnosticSourceMetadata.NormalizeProvider(candidate.SourceMetadata?.Provider)
-                == DiagnosticSourceMetadata.WindowsUpdateClientProvider
-            && candidate.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true });
-
-        return result?.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true, EventTimestamp: not null } evidence
-            ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel,
-                WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, evidence.EventTimestamp)
-            : null;
-    }
-
-    private static bool IsFreshWellFormedRun(DiagnosticRun? run)
-    {
-        if (run is null || run.Id == Guid.Empty || run.Report is not { } report) return false;
-        var now = DateTimeOffset.UtcNow;
-        return run.StartedAtUtc <= run.CompletedAtUtc
-            && run.CompletedAtUtc <= now.AddMinutes(1)
-            && now - run.CompletedAtUtc <= MaximumRunAge
-            && report.StartedAtUtc <= report.CompletedAtUtc
-            && report.StartedAtUtc >= run.StartedAtUtc.AddMinutes(-1)
-            && report.CompletedAtUtc <= run.CompletedAtUtc.AddMinutes(1);
     }
 
     private static bool TryDecode(ReadOnlySpan<byte> bytes, out string text)

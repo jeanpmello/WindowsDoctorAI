@@ -65,13 +65,19 @@ public sealed class WindowsUpdateDiagnosticScanner(IWindowsDiagnosticDataSource 
         }
         else
         {
+            var containsUnclassifiedCbsCode = probe.RecentEvents.Value
+                .Any(item => ExactCbsHresult.IsMatch(item.Message ?? string.Empty));
             var failures = probe.RecentEvents.Value
-                .Where(item => item.Level is 1 or 2 || item.Level == 3 && FailureText.IsMatch(item.Message ?? string.Empty))
+                .Where(item => !ExactCbsHresult.IsMatch(item.Message ?? string.Empty)
+                    && (item.Level is 1 or 2 || item.Level == 3 && FailureText.IsMatch(item.Message ?? string.Empty)))
                 .ToArray();
             if (failures.Length == 0)
             {
-                results.Add(DiagnosticResultFactory.Healthy(Name, Category, "Falhas recentes do Windows Update", "Nenhum evento crítico, erro ou aviso com texto de falha foi encontrado no log operacional consultado.",
-                    "Microsoft-Windows-WindowsUpdateClient/Operational; últimos 14 dias; até 100 eventos lidos."));
+                if (!containsUnclassifiedCbsCode)
+                {
+                    results.Add(DiagnosticResultFactory.Healthy(Name, Category, "Falhas recentes do Windows Update", "Nenhum evento crítico, erro ou aviso com texto de falha foi encontrado no log operacional consultado.",
+                        "Microsoft-Windows-WindowsUpdateClient/Operational; últimos 14 dias; até 100 eventos lidos."));
+                }
             }
             else
             {
@@ -86,16 +92,9 @@ public sealed class WindowsUpdateDiagnosticScanner(IWindowsDiagnosticDataSource 
                         "Pesquise o código e os detalhes deste evento no Windows Update; nenhuma correção foi aplicada.",
                         $"Log=Windows Update; ID={failure.EventId}; nível={(failure.Level == 1 ? "Critical" : "Error")}; data={time}; código {(code.Length == 0 ? "não identificado no texto" : code)}.");
                     var provider = DiagnosticSourceMetadata.FromEventProvider(failure.Provider);
-                    var currentRunEvent = provider is not null
-                        && string.Equals(failure.LogName, WindowsUpdateEventEvidence.OperationalChannel, StringComparison.OrdinalIgnoreCase)
-                        && ExactCbsHresult.IsMatch(failure.Message ?? string.Empty)
-                            ? new WindowsUpdateEventEvidence(WindowsUpdateEventEvidence.OperationalChannel,
-                                WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, failure.Timestamp)
-                            : null;
                     results.Add(result with
                     {
-                        SourceMetadata = provider,
-                        WindowsUpdateEventEvidence = currentRunEvent
+                        SourceMetadata = provider
                     });
                 }
             }

@@ -16,6 +16,8 @@ Knowledge Base começa vazia. Nenhuma regra é semeada automaticamente; o pacote
 
 A prévia valida schema e limites sem gravar; pacotes inválidos ou conflitantes são recusados sem gravação parcial. O schema 1.0 continua aceito para compatibilidade; o 1.1 exige condição estrita e metadados explícitos de evidência/procedimento, e o 1.2 também permite provider estruturado allowlist. A curadoria do piloto parte de páginas Microsoft de primeira parte, mas a alegação de publisher e as URLs não têm autenticidade criptográfica verificada. Versão, fonte e hash são declarações/metadados; hash identifica conteúdo, não autoria ou veracidade. Nenhuma regra executa código ou comando: reiniciar e repetir Setup exige confirmação do usuário e é manual; DISM/SFC é orientação manual, elevada e modificadora, sem plugin e sem rollback documentado. Confiança é força do match literal, não probabilidade de causa ou sucesso. O Root Cause Analyzer só aponta identificadores compartilhados e nunca declara causa determinada.
 
+`0x800F0831` não produz Finding ou Recommendation: a regra foi retirada do pacote piloto, e o importador e o Recommendation Engine bloqueiam esse código enquanto não existir uma chave confiável de associação entre EventRecord e CBS. A importação manual de `CBS.log` é uma observação offline independente: só classifica o tipo genérico de marcador, não exige evento/timestamp, não revela pacote e mostra o aviso “não atribuída ao evento; não confirma causa; não acionável”. O conteúdo não entra em histórico, HTML, logs ou banco e não aciona reparos.
+
 ## Estrutura
 
 ```text

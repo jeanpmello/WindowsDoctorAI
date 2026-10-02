@@ -4,6 +4,12 @@ Mudanças relevantes do Windows Doctor AI.
 
 ## [Unreleased] — Milestone 3: Knowledge & Repair Platform
 
+### Hotfix local — 0x800F0831 / CBS sem correlação
+
+- Suprimido Finding para o HRESULT `0x800F0831`; regras de conhecimento com esse código são rejeitadas e a recomendação permanece bloqueada.
+- Removidas associações CBS↔EventRecord, timestamp-match e package identity. Importação manual agora classifica somente tipos genéricos em memória e exibe disclaimer não atribuível/não acionável, sem histórico, HTML, banco ou logs.
+- Testes sintéticos cobrem eventos isolados/múltiplos/antigos/DST-like, marcadores sem evento e same-second sem Finding/Recommendation.
+
 ### Added
 
 - Modelo declarativo de conhecimento com versões de regras, erros, sintomas, causas, soluções, impacto e referências.

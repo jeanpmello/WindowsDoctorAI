@@ -203,12 +203,11 @@ public sealed class DiagnosticScannerPluginTests
     }
 
     [Fact]
-    public async Task CurrentRunRetainsOnlyTyped800f0831EventProofAfterRedaction()
+    public async Task WindowsUpdateScannerSuppresses800f0831AndSameSecondMarkerPairWithoutFindingOrRecommendation()
     {
-        const string privatePath = @"C:\Users\private.user\CBS.log";
-        const string privateHost = "PRIVATE-CBS-HOST-44";
-        const string privateToken = "private-event-token-44";
-        var eventTimestamp = DateTimeOffset.UtcNow;
+        var current = DateTimeOffset.UtcNow;
+        var dstFirst = new DateTimeOffset(2026, 11, 1, 1, 30, 0, TimeSpan.FromHours(-4));
+        var dstRepeated = new DateTimeOffset(2026, 11, 1, 1, 30, 0, TimeSpan.FromHours(-5));
         var source = new FakeWindowsDiagnosticDataSource
         {
             WindowsUpdate = new WindowsUpdateProbe(
@@ -216,26 +215,33 @@ public sealed class DiagnosticScannerPluginTests
                 ProbeResult<bool>.Unavailable("Not configured"),
                 ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available(
                 [
-                    new DiagnosticEvent(20, WindowsUpdateEventEvidence.OperationalChannel,
-                        "Microsoft-Windows-WindowsUpdateClient", 2, eventTimestamp,
-                        $"Install failed with 0x800F0831; path={privatePath}; host={privateHost}; token={privateToken}")
+                    new DiagnosticEvent(20, "Microsoft-Windows-WindowsUpdateClient/Operational",
+                        "Microsoft-Windows-WindowsUpdateClient", 2, current, "Install failed with 0x800F0831"),
+                    new DiagnosticEvent(20, "Microsoft-Windows-WindowsUpdateClient/Operational",
+                        "Microsoft-Windows-WindowsUpdateClient", 1, current.AddDays(-30), "Install failed with 0x800F0831"),
+                    new DiagnosticEvent(20, "Microsoft-Windows-WindowsUpdateClient/Operational",
+                        "Microsoft-Windows-WindowsUpdateClient", 2, dstFirst, "Install failed with 0x800F0831"),
+                    new DiagnosticEvent(20, "Microsoft-Windows-WindowsUpdateClient/Operational",
+                        "Microsoft-Windows-WindowsUpdateClient", 3, dstRepeated, "Install failed with 0x800F0831"),
+                    new DiagnosticEvent(20, "Microsoft-Windows-WindowsUpdateClient/Operational",
+                        "Microsoft-Windows-WindowsUpdateClient", 2, current, "Unrelated same-second failure 0x800F0831")
                 ]))
         };
-        var engine = new DiagnosticEngine([new WindowsUpdateDiagnosticScanner(source)], NullLogger<DiagnosticEngine>.Instance);
 
-        var report = await engine.RunAsync();
-        var eventResult = Assert.Single(report.Results, result => result.Title.Contains("ID 20", StringComparison.Ordinal));
-        var redacted = Assert.Single(DiagnosticPrivacyRedactor.RedactReport(report)!.Results,
-            result => result.WindowsUpdateEventEvidence is not null);
+        var results = await new WindowsUpdateDiagnosticScanner(source).ScanAsync();
+        var report = new DiagnosticReport(results, current, current, TimeSpan.Zero, new HealthScore(80));
+        var sameSecondMarker = $"{current.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)}, Info CBS Store corruption, manifest missing for package: Package_123_for_KB3192392~31bf3856ad364e35~amd64~~6.3.1.4\n";
+        var markerTypes = new CbsLogMarkerClassifier().Classify(sameSecondMarker);
+        var disabledRule = new KnowledgeRule("synthetic-800f", 1, "Windows Update", "Regra de teste desativada",
+            KnowledgeImpact.Moderate, ["0x800F0831"], [], [], [],
+            [new KnowledgeReference("Fixture", "https://example.invalid/docs")]);
 
-        Assert.Equal("WindowsUpdateClient", eventResult.SourceMetadata?.Provider);
-        Assert.True(eventResult.WindowsUpdateEventEvidence?.IsExactCbsStoreCorruptionEvent);
-        Assert.Equal(eventTimestamp, eventResult.WindowsUpdateEventEvidence?.EventTimestamp);
-        Assert.Equal(eventResult.WindowsUpdateEventEvidence, redacted.WindowsUpdateEventEvidence);
-        var serialized = System.Text.Json.JsonSerializer.Serialize(redacted);
-        Assert.DoesNotContain(privatePath, serialized, StringComparison.Ordinal);
-        Assert.DoesNotContain(privateHost, serialized, StringComparison.Ordinal);
-        Assert.DoesNotContain(privateToken, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(results, result => result.Status == DiagnosticStatus.Finding);
+        Assert.DoesNotContain(results, result => result.Status == DiagnosticStatus.Healthy
+            && result.Title == "Falhas recentes do Windows Update");
+        Assert.DoesNotContain(results, result => result.Evidence.Contains("0x800F0831", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(CbsMarkerType.ManifestMissing, Assert.Single(markerTypes));
+        Assert.Empty(new RecommendationEngine().Recommend(report, [disabledRule]));
     }
 
     [Fact]

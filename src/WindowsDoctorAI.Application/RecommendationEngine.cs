@@ -17,6 +17,7 @@ public sealed class RecommendationEngine
         var recommendations = new List<DiagnosticRecommendation>();
         foreach (var rule in rules)
         {
+            if (IsDisabledCbsCodeRule(rule)) continue;
             var matches = new List<(DiagnosticResult Result, string Indicator, bool ExactCode)>();
             foreach (var finding in findings)
             {
@@ -26,25 +27,11 @@ public sealed class RecommendationEngine
                     var sourceProvider = finding.SourceMetadata is { } sourceMetadata
                         ? DiagnosticSourceMetadata.NormalizeProvider(sourceMetadata.Provider)
                         : null;
-                    var currentRunEventMatches = !string.Equals(
-                            strictMatch.ExactErrorCode,
-                            WindowsUpdateEventEvidence.CbsStoreCorruptionHresult,
-                            StringComparison.OrdinalIgnoreCase)
-                        || finding.WindowsUpdateEventEvidence is { IsExactCbsStoreCorruptionEvent: true };
                     var requiredEvidenceTypes = strictMatch.RequiredEvidenceTypes ?? Array.Empty<string>();
-                    var evidenceTypeMatches = requiredEvidenceTypes.Count == 0
-                        || finding.CbsEvidence is { } cbsEvidence
-                        && Enum.IsDefined(cbsEvidence.Type)
-                        && CbsPackageIdentityValidator.IsValid(cbsEvidence.PackageIdentity)
-                        && requiredEvidenceTypes.Contains(cbsEvidence.Type.ToString(), StringComparer.Ordinal)
-                        && string.Equals(finding.Evidence,
-                            $"CBS marker={cbsEvidence.Type}; package identity={cbsEvidence.PackageIdentity}",
-                            StringComparison.Ordinal);
                     if (!strictMatch.ScannerNames.Contains(finding.ScannerName, StringComparer.OrdinalIgnoreCase)
                         || !strictMatch.RequiredContextTerms.All(term => ContainsPhrase(searchable, term))
                         || !strictMatch.RequiredSourceProviders.All(provider => string.Equals(sourceProvider, provider, StringComparison.OrdinalIgnoreCase))
-                        || !currentRunEventMatches
-                        || !evidenceTypeMatches
+                        || requiredEvidenceTypes.Count != 0
                         || !ContainsToken(searchable, strictMatch.ExactErrorCode))
                         continue;
                     matches.Add((finding, strictMatch.ExactErrorCode, true));
@@ -108,6 +95,11 @@ public sealed class RecommendationEngine
             .ThenBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToArray();
     }
+
+    private static bool IsDisabledCbsCodeRule(KnowledgeRule rule) =>
+        string.Equals(rule.Match?.ExactErrorCode, "0x800F0831", StringComparison.OrdinalIgnoreCase)
+        || rule.ErrorCodes.Any(code => string.Equals(code, "0x800F0831", StringComparison.OrdinalIgnoreCase))
+        || rule.Symptoms.Any(symptom => ContainsToken(symptom, "0x800F0831"));
 
     private static bool ContainsToken(string text, string token)
     {

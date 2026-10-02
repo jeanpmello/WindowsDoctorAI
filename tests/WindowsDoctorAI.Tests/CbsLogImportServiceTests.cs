@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using WindowsDoctorAI.Application;
@@ -10,7 +9,7 @@ namespace WindowsDoctorAI.Tests;
 
 public sealed class CbsLogImportServiceTests
 {
-    private const string ValidPackage = "Package_123_for_KB3192392~31bf3856ad364e35~amd64~~6.3.1.4";
+    private const string PackageIdentity = "Package_123_for_KB3192392~31bf3856ad364e35~amd64~~6.3.1.4";
     private const string PrivatePath = @"C:\Users\private.user\CBS.log";
     private const string PrivateHost = "CBS-PRIVATE-HOST-938";
     private const string PrivateUser = "private.user@example.invalid";
@@ -20,12 +19,11 @@ public sealed class CbsLogImportServiceTests
     public async Task CancelledPickerReturnsSafeCancelledState()
     {
         var picker = new FakePicker(_ => Task.FromResult<Stream?>(null));
-        var service = Service(picker);
 
-        var outcome = await service.ImportAndAnalyzeAsync(CurrentRun());
+        var outcome = await Service(picker).ImportAndAnalyzeAsync();
 
         Assert.Equal(CbsLogImportStatus.Cancelled, outcome.Status);
-        Assert.Null(outcome.Result);
+        Assert.Null(outcome.MarkerTypes);
         Assert.Equal(1, picker.Calls);
     }
 
@@ -33,7 +31,7 @@ public sealed class CbsLogImportServiceTests
     public async Task IoErrorDoesNotExposeExceptionPathOrMessage()
     {
         var picker = new FakePicker(_ => Task.FromResult<Stream?>(new ThrowingReadStream(PrivatePath)));
-        var outcome = await Service(picker).ImportAndAnalyzeAsync(CurrentRun());
+        var outcome = await Service(picker).ImportAndAnalyzeAsync();
         var serialized = JsonSerializer.Serialize(outcome);
 
         Assert.Equal(CbsLogImportStatus.FileReadFailed, outcome.Status);
@@ -46,23 +44,22 @@ public sealed class CbsLogImportServiceTests
     {
         var picker = new FakePicker(_ => Task.FromException<Stream?>(new FileNotFoundException(PrivatePath)));
 
-        var outcome = await Service(picker).ImportAndAnalyzeAsync(CurrentRun());
+        var outcome = await Service(picker).ImportAndAnalyzeAsync();
 
         Assert.Equal(CbsLogImportStatus.FileReadFailed, outcome.Status);
         Assert.DoesNotContain(PrivatePath, JsonSerializer.Serialize(outcome), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task FileOverMaximumIsRejectedBeforeAnalyzerRuns()
+    public async Task FileOverMaximumIsRejectedBeforeClassifierRuns()
     {
-        var analyzer = new CountingAnalyzer();
+        var classifier = new CountingClassifier();
         var picker = new FakePicker(_ => Task.FromResult<Stream?>(new MemoryStream(new byte[CbsLogImportService.MaximumFileBytes + 1])));
-        var service = new CbsLogImportService(picker, analyzer);
 
-        var outcome = await service.ImportAndAnalyzeAsync(CurrentRun());
+        var outcome = await new CbsLogImportService(picker, classifier).ImportAndAnalyzeAsync();
 
         Assert.Equal(CbsLogImportStatus.FileTooLarge, outcome.Status);
-        Assert.Equal(0, analyzer.Calls);
+        Assert.Equal(0, classifier.Calls);
     }
 
     [Fact]
@@ -71,148 +68,78 @@ public sealed class CbsLogImportServiceTests
         var unsupported = new byte[] { 0xFF, 0xFE, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00 };
         var picker = new FakePicker(_ => Task.FromResult<Stream?>(new MemoryStream(unsupported)));
 
-        var outcome = await Service(picker).ImportAndAnalyzeAsync(CurrentRun());
+        var outcome = await Service(picker).ImportAndAnalyzeAsync();
 
         Assert.Equal(CbsLogImportStatus.UnsupportedEncoding, outcome.Status);
-        Assert.Null(outcome.Result);
+        Assert.Null(outcome.MarkerTypes);
     }
 
     [Fact]
-    public async Task CurrentEventAndTemporallyMatchingCbsMarkerProduceOnlyGenericTransientResult()
+    public async Task MarkerWithoutAnyEventIsAStandaloneOfflineObservation()
     {
-        var run = CurrentRun();
-        var cbsBody = CbsMarker(run, ValidPackage)
-            + $"Info CBS unrelated private data {PrivatePath}; host={PrivateHost}; user={PrivateUser}; token={PrivateToken}\r\n";
-        var picker = new FakePicker(_ => Task.FromResult<Stream?>(new MemoryStream(Encoding.UTF8.GetBytes(cbsBody))));
-        var analyzer = new WindowsUpdateCbsLogAnalyzer();
-        var service = new CbsLogImportService(picker, analyzer);
-        var originalRunJson = JsonSerializer.Serialize(run);
+        var cbsText = "1999-01-01 00:00:00, Info CBS Store corruption, manifest missing for package: " + PackageIdentity + "\r\n"
+            + "2026-11-01 01:30:00, Error CBS Failed to resolve package 'unrelated-package' [HRESULT = 0x800F0831 - CBS_E_STORE_CORRUPTION]\r\n"
+            + $"Private {PrivatePath}; host={PrivateHost}; user={PrivateUser}; token={PrivateToken}\r\n";
+        var picker = PickerFor(cbsText);
 
-        var outcome = await service.ImportAndAnalyzeAsync(run);
-        var serializedOutcome = JsonSerializer.Serialize(outcome);
+        var outcome = await Service(picker).ImportAndAnalyzeAsync();
+        var serialized = JsonSerializer.Serialize(outcome);
 
-        Assert.Equal(CbsLogImportStatus.Finding, outcome.Status);
-        Assert.Equal(new CbsPackageEvidence(CbsEvidenceType.ManifestMissing), outcome.Result?.CbsEvidence);
-        Assert.Null(outcome.Result?.CbsEvidence?.PackageIdentity);
-        Assert.Equal("WindowsUpdateClient", outcome.Result?.SourceMetadata?.Provider);
-        Assert.DoesNotContain(ValidPackage, serializedOutcome, StringComparison.Ordinal);
-        Assert.DoesNotContain(PrivatePath, serializedOutcome, StringComparison.Ordinal);
-        Assert.DoesNotContain(PrivateHost, serializedOutcome, StringComparison.Ordinal);
-        Assert.DoesNotContain(PrivateUser, serializedOutcome, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(PrivateToken, serializedOutcome, StringComparison.Ordinal);
-        Assert.DoesNotContain("Store corruption, manifest missing", serializedOutcome, StringComparison.Ordinal);
-        Assert.DoesNotContain("0x800F0831; path=", serializedOutcome, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(originalRunJson, JsonSerializer.Serialize(run));
-        // The service has no logger, repository, or report/HTML writer; only minimized generic metadata is returned.
+        Assert.Equal(CbsLogImportStatus.ObservationAvailable, outcome.Status);
+        Assert.Equal([CbsMarkerType.ManifestMissing, CbsMarkerType.FailedToResolvePackage], outcome.MarkerTypes);
+        Assert.DoesNotContain(PackageIdentity, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("unrelated-package", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(PrivatePath, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(PrivateHost, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(PrivateUser, serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(PrivateToken, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("Store corruption, manifest missing", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("0x800F0831", serialized, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task OldOrStructurallyForgedRunDoesNotOpenPicker()
+    public async Task SameSecondMarkerPairProducesOnlyNonDiagnosticTypesAndNoRecommendation()
     {
-        var picker = new FakePicker(_ => Task.FromResult<Stream?>(new MemoryStream(Encoding.UTF8.GetBytes("unused\n"))));
-        var service = Service(picker);
-        var valid = CurrentRun();
-        var twoHoursAgo = DateTimeOffset.UtcNow.AddHours(-2);
-        var stale = valid with { StartedAtUtc = twoHoursAgo.AddMinutes(-1), CompletedAtUtc = twoHoursAgo };
-        var forged = valid with { Id = Guid.Empty };
+        const string sameSecondCbs = "2026-10-02 20:00:00, Info CBS Store corruption, manifest missing for package: " + PackageIdentity + "\n";
+        var outcome = await Service(PickerFor(sameSecondCbs)).ImportAndAnalyzeAsync();
+        var diagnosticProperties = typeof(CbsLogImportOutcome).GetProperties()
+            .Where(property => typeof(DiagnosticResult).IsAssignableFrom(property.PropertyType));
 
-        Assert.Equal(CbsLogImportStatus.NoCurrentRunEvent, (await service.ImportAndAnalyzeAsync(stale)).Status);
-        Assert.Equal(CbsLogImportStatus.NoCurrentRunEvent, (await service.ImportAndAnalyzeAsync(forged)).Status);
-        Assert.Equal(0, picker.Calls);
+        Assert.Equal(CbsLogImportStatus.ObservationAvailable, outcome.Status);
+        Assert.Empty(diagnosticProperties);
+        Assert.DoesNotContain("Result", typeof(CbsLogImportOutcome).GetProperties().Select(property => property.Name));
+        Assert.DoesNotContain("Recommendation", typeof(CbsLogImportOutcome).GetProperties().Select(property => property.Name));
+        Assert.DoesNotContain("Finding", Enum.GetNames<CbsLogImportStatus>());
+        Assert.DoesNotContain("0x800F0831", JsonSerializer.Serialize(outcome), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task MarkerForAnotherPackageAtUnrelatedSecondProducesNoRecommendation()
+    public async Task HresultWithoutRecognizedCbsMarkerProducesNoObservation()
     {
-        const string anotherPackage = "Package_456_for_KB3192393~31bf3856ad364e35~amd64~~6.3.1.4";
-        var run = CurrentRun();
-        var picker = new FakePicker(_ => Task.FromResult<Stream?>(new MemoryStream(
-            Encoding.UTF8.GetBytes(CbsMarker(run, anotherPackage, secondsOffset: 1)))));
+        var picker = PickerFor("WindowsUpdateClient event failed with HRESULT 0x800F0831\r\n");
 
-        var outcome = await Service(picker).ImportAndAnalyzeAsync(run);
+        var outcome = await Service(picker).ImportAndAnalyzeAsync();
 
-        Assert.Equal(CbsLogImportStatus.NoRecognizedEvidence, outcome.Status);
-        Assert.Null(outcome.Result);
-        Assert.Equal(1, picker.Calls);
+        Assert.Equal(CbsLogImportStatus.NoRecognizedMarker, outcome.Status);
+        Assert.Null(outcome.MarkerTypes);
     }
 
     [Fact]
-    public async Task HresultOrFileAloneDoesNotInvokePickerOrProduceFinding()
+    public async Task OrdinaryUnrelatedSameSecondLinesDoNotCreateAnObservation()
     {
-        var picker = new FakePicker(_ => Task.FromResult<Stream?>(new MemoryStream(Encoding.UTF8.GetBytes("unused\n"))));
-        var service = Service(picker);
-        var resultWithoutTypedEvent = FindingResult() with
-        {
-            Description = "Windows Update event contains 0x800F0831.",
-            WindowsUpdateEventEvidence = null
-        };
-        var runWithHresultOnly = RunWithResult(resultWithoutTypedEvent);
+        var picker = PickerFor("2026-10-02 20:00:00, Info CBS unrelated private data\r\n"
+            + "2026-10-02 20:00:00, Error Windows Update event 0x800F0831\r\n");
 
-        var outcome = await service.ImportAndAnalyzeAsync(runWithHresultOnly);
+        var outcome = await Service(picker).ImportAndAnalyzeAsync();
 
-        Assert.Equal(CbsLogImportStatus.NoCurrentRunEvent, outcome.Status);
-        Assert.Null(outcome.Result);
-        Assert.Equal(0, picker.Calls);
-
-        var noRunOutcome = await service.ImportAndAnalyzeAsync(null);
-        Assert.Equal(CbsLogImportStatus.NoCurrentRunEvent, noRunOutcome.Status);
-        Assert.Equal(0, picker.Calls);
+        Assert.Equal(CbsLogImportStatus.NoRecognizedMarker, outcome.Status);
+        Assert.Null(outcome.MarkerTypes);
     }
 
-    [Fact]
-    public async Task WrongChannelOrProviderIsNotTreatedAsCurrentWindowsUpdateEvent()
-    {
-        var picker = new FakePicker(_ => Task.FromResult<Stream?>(new MemoryStream(Encoding.UTF8.GetBytes("anything\n"))));
-        var service = Service(picker);
-        var wrongChannel = RunWithResult(FindingResult() with
-        {
-            WindowsUpdateEventEvidence = new WindowsUpdateEventEvidence("System", WindowsUpdateEventEvidence.CbsStoreCorruptionHresult,
-                DateTimeOffset.UtcNow)
-        });
-        var wrongProvider = RunWithResult(FindingResult() with
-        {
-            SourceMetadata = new DiagnosticSourceMetadata("OtherProvider")
-        });
+    private static CbsLogImportService Service(FakePicker picker) => new(picker, new CbsLogMarkerClassifier());
 
-        Assert.Equal(CbsLogImportStatus.NoCurrentRunEvent, (await service.ImportAndAnalyzeAsync(wrongChannel)).Status);
-        Assert.Equal(CbsLogImportStatus.NoCurrentRunEvent, (await service.ImportAndAnalyzeAsync(wrongProvider)).Status);
-        Assert.Equal(0, picker.Calls);
-    }
-
-    private static CbsLogImportService Service(FakePicker picker) => new(picker, new WindowsUpdateCbsLogAnalyzer());
-
-    private static DiagnosticRun CurrentRun()
-    {
-        var now = DateTimeOffset.UtcNow;
-        return RunWithResult(FindingResult(now));
-    }
-
-    private static DiagnosticRun RunWithResult(DiagnosticResult result)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var report = new DiagnosticReport([result], now.AddSeconds(-1), now, TimeSpan.Zero, new HealthScore(92));
-        return new DiagnosticRun(Guid.NewGuid(), now.AddSeconds(-2), now, TimeSpan.FromSeconds(2), new ComputerInventory(), report);
-    }
-
-    private static DiagnosticResult FindingResult(DateTimeOffset? eventTimestamp = null)
-    {
-        var timestamp = eventTimestamp ?? DateTimeOffset.UtcNow;
-        return new DiagnosticResult(
-            "Windows Update", "Sistema", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
-            "Evento de falha do Windows Update (ID 20)", "Mensagem bruta do evento omitida.",
-            "Revise o evento na fonte.", "Log=Windows Update; código 0x800F0831.", TimeSpan.Zero, timestamp)
-        {
-            SourceMetadata = new DiagnosticSourceMetadata("WindowsUpdateClient"),
-            WindowsUpdateEventEvidence = new WindowsUpdateEventEvidence(
-                WindowsUpdateEventEvidence.OperationalChannel, WindowsUpdateEventEvidence.CbsStoreCorruptionHresult, timestamp)
-        };
-    }
-
-    private static string CbsMarker(DiagnosticRun run, string package, int secondsOffset = 0)
-    {
-        var timestamp = run.Report!.Results.Single().WindowsUpdateEventEvidence!.EventTimestamp!.Value.AddSeconds(secondsOffset);
-        return $"{timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)}, Info CBS Store corruption, manifest missing for package: {package}\r\n";
-    }
+    private static FakePicker PickerFor(string text) => new(_ => Task.FromResult<Stream?>(
+        new MemoryStream(Encoding.UTF8.GetBytes(text))));
 
     private sealed class FakePicker(Func<CancellationToken, Task<Stream?>> pick) : ICbsLogFilePicker
     {
@@ -225,13 +152,13 @@ public sealed class CbsLogImportServiceTests
         }
     }
 
-    private sealed class CountingAnalyzer : IWindowsUpdateCbsLogAnalyzer
+    private sealed class CountingClassifier : ICbsLogMarkerClassifier
     {
         public int Calls { get; private set; }
-        public DiagnosticResult? AnalyzeWithCurrentRunEvent(string? cbsLogText, WindowsUpdateEventEvidence? eventEvidence)
+        public IReadOnlyList<CbsMarkerType> Classify(string? cbsLogText)
         {
             Calls++;
-            return null;
+            return Array.Empty<CbsMarkerType>();
         }
     }
 

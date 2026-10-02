@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.3",
-  "version": "microsoft-windows-pilot-2026-10-02-v3",
-  "source": "Windows Doctor AI: curadoria de primeira parte de páginas Microsoft. Publisher e URLs não autenticados criptograficamente.",
+  "version": "microsoft-windows-pilot-2026-10-02-v4",
+  "source": "Curadoria de primeira parte Microsoft. Publisher e URLs não autenticados criptograficamente. 0x800F0831 removido até chave confiável.",
   "rules": [
     {
       "id": "microsoft.windows-setup.0xc1900107",
@@ -84,54 +84,6 @@
         "rollback": "Indisponível: as páginas citadas não documentam rollback para DISM/SFC.",
         "sourceLimitation": "A página Learn identifica 0x80073712 como ERROR_SXS_COMPONENT_STORE_CORRUPT e prescreve DISM, seguido de SFC somente após sucesso. O artigo Learn é destinado a suporte e profissionais de TI. A página Support também descreve arquivo do Windows Update possivelmente danificado/ausente. As fontes não nomeiam arquivos específicos nem garantem reparo ou rollback.",
         "isModifying": true,
-        "requiresUserConfirmation": true,
-        "manualOnly": true
-      }
-    },
-    {
-      "id": "microsoft.windows-update.0x800f0831-cbs-evidence",
-      "version": 1,
-      "domain": "Windows Update / Component Store",
-      "title": "Evidência CBS específica para 0x800F0831",
-      "impact": "moderate",
-      "errorCodes": [],
-      "symptoms": [],
-      "causes": [],
-      "solutions": [],
-      "references": [
-        {
-          "title": "Error 0x800F0831 when you install an update",
-          "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/error-0x800f0831-installing-update"
-        },
-        {
-          "title": "Troubleshoot Windows Update installation Error 0x800F0831",
-          "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/troubleshoot-windows-update-installation-error-corruption"
-        }
-      ],
-      "applicability": "Diagnóstico observacional quando o evento estruturado WindowsUpdateClient contém 0x800F0831 e há um marcador CBS Microsoft compatível com uma package identity validada. Os artigos citados documentam esse código e exemplos de log. Esta regra não presume versão de Windows, causa definitiva nem aplicabilidade de correção.",
-      "match": {
-        "exactErrorCode": "0x800F0831",
-        "scannerNames": ["Windows Update"],
-        "requiredContextTerms": ["CBS marker="],
-        "requiredSourceProviders": ["WindowsUpdateClient"],
-        "requiredEvidenceTypes": ["ManifestMissing", "FailedToResolvePackage"]
-      },
-      "requiredEvidence": [
-        "HRESULT exato 0x800F0831 tipado a partir do evento WindowsUpdateClient/Operational da execução diagnóstica atual",
-        "Provider estruturado WindowsUpdateClient no achado",
-        "Marcador CBS Microsoft de manifest missing ou Failed to resolve package",
-        "Package identity validada por formato estrito. Nenhum texto bruto do CBS é preservado"
-      ],
-      "procedure": {
-        "diagnosticAction": "Associe o código exato do evento WindowsUpdateClient da execução diagnóstica atual apenas quando um CBS.log selecionado manualmente contiver um dos marcadores Microsoft reconhecidos e uma package identity válida. O resultado conserva somente tipo do marcador e identidade do pacote.",
-        "correctiveAction": "Esta regra é somente diagnóstica: não fornece nem executa reparo. Confirme manualmente a atualização e encaminhe a evidência minimizada ao suporte responsável, se necessário.",
-        "requiredPrivilege": "Nenhuma elevação é necessária para selecionar e analisar o CBS.log manualmente.",
-        "requiresElevation": false,
-        "risk": "A análise do CBS.log selecionado é somente leitura e em memória, limitada a 2 MiB, sem modificar o sistema.",
-        "backup": "Não aplicável: nenhuma alteração é proposta ou executada.",
-        "rollback": "Não aplicável: nenhuma alteração é proposta ou executada.",
-        "sourceLimitation": "A documentação Microsoft associa 0x800F0831 a problemas de resolução de pacote/manifesto e mostra os marcadores CBS citados. Esta regra não conclui causa, não recomenda DISM/SFC e não implementa nenhuma correção.",
-        "isModifying": false,
         "requiresUserConfirmation": true,
         "manualOnly": true
       }

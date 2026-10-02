@@ -39,37 +39,11 @@ public sealed record DiagnosticSourceMetadata(string Provider)
             : null;
 }
 
-/// <summary>Metadados minimizados do evento Windows Update; o timestamp não identifica um pacote CBS.</summary>
-public sealed record WindowsUpdateEventEvidence(string LogName, string ErrorCode, DateTimeOffset? EventTimestamp = null)
-{
-    public const string OperationalChannel = "Microsoft-Windows-WindowsUpdateClient/Operational";
-    public const string CbsStoreCorruptionHresult = "0x800F0831";
-
-    public bool IsExactCbsStoreCorruptionEvent =>
-        string.Equals(LogName, OperationalChannel, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(ErrorCode, CbsStoreCorruptionHresult, StringComparison.OrdinalIgnoreCase);
-}
-
-/// <summary>Marcadores CBS da Microsoft aceitos para diagnóstico de pacote ausente/resolução falha.</summary>
-public enum CbsEvidenceType
+/// <summary>Tipos genéricos reconhecidos de marcador textual CBS; não representam associação ou causa.</summary>
+public enum CbsMarkerType
 {
     ManifestMissing,
     FailedToResolvePackage
-}
-
-/// <summary>Metadado CBS minimizado; package identity permanece ausente quando não há vínculo verificável.</summary>
-public sealed record CbsPackageEvidence(CbsEvidenceType Type, string? PackageIdentity = null);
-
-/// <summary>Valida package identities CBS por formato estrito, sem aceitar caminhos ou texto livre.</summary>
-public static class CbsPackageIdentityValidator
-{
-    private static readonly Regex IdentityPattern = new(
-        @"\A(?:Package_[0-9]{1,6}_for_KB[0-9]{6,8}|Microsoft-Windows-[A-Za-z0-9][A-Za-z0-9.-]{0,80}-Package)~[A-Fa-f0-9]{16}~(?:amd64|arm64|x86|wow64|msil|neutral|none)~(?:[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?)?~[0-9]{1,5}(?:\.[0-9]{1,5}){3}\z",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-        TimeSpan.FromMilliseconds(50));
-
-    public static bool IsValid(string? packageIdentity) =>
-        packageIdentity is { Length: <= 240 } && IdentityPattern.IsMatch(packageIdentity);
 }
 
 /// <summary>Formato comum e serializável entregue por todos os scanners e plugins.</summary>
@@ -88,11 +62,6 @@ public sealed record DiagnosticResult(
     /// <summary>Metadado de origem estruturado, normalizado e independente do texto do evento.</summary>
     public DiagnosticSourceMetadata? SourceMetadata { get; init; }
 
-    /// <summary>Evidência CBS minimizada; texto bruto, caminho e conteúdo do evento não são armazenados aqui.</summary>
-    public CbsPackageEvidence? CbsEvidence { get; init; }
-
-    /// <summary>Canal/HRESULT tipados e minimizados do evento Windows Update desta execução.</summary>
-    public WindowsUpdateEventEvidence? WindowsUpdateEventEvidence { get; init; }
 }
 
 /// <summary>Resumo da cobertura real por categoria, sem tratar indisponibilidade como saúde.</summary>
