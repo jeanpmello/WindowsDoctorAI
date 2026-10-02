@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "1.1",
+  "version": "microsoft-windows-pilot-2026-10-02-v1",
+  "source": "Windows Doctor AI: curadoria de primeira parte de páginas Microsoft. Publisher e URLs não autenticados criptograficamente.",
+  "rules": [
+    {
+      "id": "microsoft.windows-setup.0xc1900107",
+      "version": 1,
+      "domain": "Windows Setup",
+      "title": "Limpeza pendente da instalação anterior (0xC1900107)",
+      "impact": "moderate",
+      "errorCodes": [],
+      "symptoms": [],
+      "causes": [],
+      "solutions": [],
+      "references": [
+        {
+          "title": "Get help with Windows upgrade and installation errors",
+          "url": "https://support.microsoft.com/en-us/windows/deployment/install-upgrade/get-help-with-windows-upgrade-and-installation-errors"
+        }
+      ],
+      "applicability": "Somente para o contexto explicitamente observado de Windows Setup durante instalação ou atualização do Windows. A página citada não especifica uma faixa de versões nesta regra.",
+      "match": {
+        "exactErrorCode": "0xC1900107",
+        "scannerNames": ["Windows Update"],
+        "requiredContextTerms": ["Windows Setup"]
+      },
+      "requiredEvidence": [
+        "Código literal 0xC1900107 no achado",
+        "Texto explícito Windows Setup no mesmo achado"
+      ],
+      "procedure": {
+        "diagnosticAction": "Confirme o código exato e o contexto de Windows Setup no mesmo achado. Não aplique esta regra a um código isolado ou ocorrido em outro contexto.",
+        "correctiveAction": "Somente após confirmação do usuário: reinicie o Windows e tente novamente o Windows Setup. Este aplicativo não reinicia o computador nem inicia o Setup.",
+        "requiredPrivilege": "A página não prescreve elevação. A reinicialização e a nova tentativa são decisões manuais do usuário.",
+        "requiresElevation": false,
+        "risk": "Uma reinicialização pode interromper trabalho não salvo. Escolha um momento adequado.",
+        "backup": "Salve o trabalho aberto antes da reinicialização. A página não descreve procedimento de backup específico.",
+        "rollback": "Indisponível/não aplicável: a fonte não documenta rollback para reiniciar e repetir o Setup.",
+        "sourceLimitation": "A página associa 0xC1900107 a limpeza de instalação anterior pendente e recomenda reiniciar e repetir o Setup. Não garante sucesso nem descreve backup ou rollback.",
+        "isModifying": true,
+        "requiresUserConfirmation": true,
+        "manualOnly": true
+      }
+    },
+    {
+      "id": "microsoft.windows-update.0x80073712",
+      "version": 1,
+      "domain": "Windows Update / Component Store",
+      "title": "Integridade do component store (0x80073712)",
+      "impact": "moderate",
+      "errorCodes": [],
+      "symptoms": [],
+      "causes": [],
+      "solutions": [],
+      "references": [
+        {
+          "title": "Get help with Windows upgrade and installation errors",
+          "url": "https://support.microsoft.com/en-us/windows/deployment/install-upgrade/get-help-with-windows-upgrade-and-installation-errors"
+        },
+        {
+          "title": "Fix Windows Update errors",
+          "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/fix-windows-update-errors"
+        }
+      ],
+      "applicability": "Windows 11, Windows 10 e Windows Server 2016 ou posterior, no contexto de Windows Update/servicing, conforme a página Learn citada.",
+      "match": {
+        "exactErrorCode": "0x80073712",
+        "scannerNames": ["Windows Update"],
+        "requiredContextTerms": ["WindowsUpdateClient"]
+      },
+      "requiredEvidence": [
+        "Código literal 0x80073712 no achado",
+        "Contexto WindowsUpdateClient no mesmo achado"
+      ],
+      "procedure": {
+        "diagnosticAction": "Confirme o código exato e o contexto WindowsUpdateClient no mesmo achado. Se a etapa DISM falhar, preserve e inspecione CBS.log.",
+        "correctiveAction": "Ação manual, elevada e modificadora: siga o procedimento DISM documentado pela Microsoft. Execute System File Checker (SFC) somente se DISM concluir com sucesso. Se DISM falhar, não prossiga para SFC. Preserve e inspecione CBS.log.",
+        "requiredPrivilege": "Elevação administrativa para o procedimento DISM, conforme a documentação Microsoft. Este pacote contém apenas orientação, sem comandos executáveis.",
+        "requiresElevation": true,
+        "risk": "Ação privilegiada e modificadora do sistema. As páginas não quantificam risco, duração ou resultado.",
+        "backup": "As páginas não especificam etapa de backup. Antes da ação modificadora, siga a política de recuperação adequada ao ambiente.",
+        "rollback": "Indisponível: as páginas citadas não documentam rollback para DISM/SFC.",
+        "sourceLimitation": "A página Learn identifica 0x80073712 como ERROR_SXS_COMPONENT_STORE_CORRUPT e prescreve DISM, seguido de SFC somente após sucesso. O artigo Learn é destinado a suporte e profissionais de TI. A página Support também descreve arquivo do Windows Update possivelmente danificado/ausente. As fontes não nomeiam arquivos específicos nem garantem reparo ou rollback.",
+        "isModifying": true,
+        "requiresUserConfirmation": true,
+        "manualOnly": true
+      }
+    }
+  ]
+}

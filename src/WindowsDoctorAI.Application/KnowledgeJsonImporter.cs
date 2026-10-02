@@ -13,13 +13,24 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
 {
     public const int MaximumPackageBytes = 512 * 1024;
     public const int MaximumRules = 500;
+    private const int MaximumConditionItems = 10;
     private static readonly Regex SafeIdentifier = new(@"\A[A-Za-z0-9._-]{1,80}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex SafeErrorCode = new(@"\A0x[0-9a-fA-F]{8}\z", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> GenericScannerNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "*", "all", "any", "unknown", "none", "system"
+    };
+    private static readonly HashSet<string> GenericContextTerms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "*", "all", "any", "error", "error code", "code", "failure", "failed", "update",
+        "windows", "setup", "install", "installation", "repair", "service", "servicing", "system", "unknown"
+    };
     private static readonly Regex UnsafeText = new(
-        @"(?:[A-Za-z]:\\|\\\\|\$\(|`|&&|\|\||[;<>]|\b(?:powershell(?:\.exe)?|cmd(?:\.exe)?|pwsh|bash|sh)\s*(?:-Command|-EncodedCommand|/c|/k)?\b)",
+        @"(?:[A-Za-z]:\\|\\\\|\$\(|`|&&|\|\||[;<>]|\b(?:powershell(?:\.exe)?|cmd(?:\.exe)?|pwsh|bash|sh)\s*(?:-Command|-EncodedCommand|/c|/k)?\b|\b(?:script|commands?|executable)\b|(?<![A-Za-z0-9:/.-])[\w-]+\.(?:exe|bat|cmd|ps1|psm1|vbs|js|sh|com)\b|\b(?:shutdown|restart-computer|stop-computer|format|diskpart|whoami|dism|sfc|reg|sc|net|chkdsk|bcdedit|wmic|taskkill|ipconfig|systeminfo|wevtutil|powercfg|rundll32|regsvr32|python3?|node|npm|perl|ruby|cscript|wscript)\s+(?:/|-[A-Za-z]))",
         RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(100));
     private static readonly Regex AbsolutePath = new(
-        @"(?:^|[\s""'=(,:])[A-Za-z]:[\\/]|\\\\|(?<![A-Za-z0-9:/])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+",
+        @"(?:^|[\s""'=(,:])[A-Za-z]:[\\/]|\\\\|(?<![A-Za-z:/])/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(100));
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
@@ -65,7 +76,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         }
         catch (JsonException exception)
         {
-            throw new InvalidDataException("JSON inválido ou fora do schema de conhecimento 1.0.", exception);
+            throw new InvalidDataException("JSON inválido ou fora do schema de conhecimento 1.0/1.1.", exception);
         }
 
         Validate(package);
@@ -75,8 +86,9 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
 
     private static void Validate(KnowledgePackage package)
     {
-        if (!string.Equals(package.SchemaVersion, "1.0", StringComparison.Ordinal))
-            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0'.");
+        var strictSchema = package.SchemaVersion == "1.1";
+        if (!strictSchema && package.SchemaVersion != "1.0")
+            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0' ou '1.1'.");
         ValidateText(package.Version, "version", 40);
         if (!Regex.IsMatch(package.Version, @"\A[A-Za-z0-9._-]{1,40}\z", RegexOptions.CultureInvariant))
             throw new InvalidDataException("version deve conter apenas letras, números, ponto, hífen ou sublinhado.");
@@ -108,7 +120,61 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
                 if (!Uri.TryCreate(reference.Url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(uri.Host))
                     throw new InvalidDataException($"A referência da regra {rule.Id} deve ser uma URL HTTPS absoluta.");
             }
+
+            if (strictSchema)
+                ValidateStrictRule(rule);
+            else if (rule.Applicability is not null || rule.Match is not null || rule.RequiredEvidence is not null || rule.Procedure is not null)
+                throw new InvalidDataException($"A regra {rule.Id} usa campos do schema 1.1, mas o pacote declara 1.0.");
         }
+    }
+
+    private static void ValidateStrictRule(KnowledgeRule rule)
+    {
+        ValidateText(rule.Applicability, $"applicability ({rule.Id})", 600);
+        if (rule.Match is null)
+            throw new InvalidDataException($"A regra {rule.Id} precisa de condição de match estrita no schema 1.1.");
+        ValidateText(rule.Match.ExactErrorCode, $"match.exactErrorCode ({rule.Id})", 10);
+        if (!SafeErrorCode.IsMatch(rule.Match.ExactErrorCode))
+            throw new InvalidDataException($"A regra {rule.Id} precisa de um código exato no formato 0x seguido por oito dígitos hexadecimais.");
+        ValidateRequiredConditions(rule.Match.ScannerNames, "match.scannerNames", rule.Id, 80);
+        ValidateRequiredConditions(rule.Match.RequiredContextTerms, "match.requiredContextTerms", rule.Id, 120);
+        if (rule.Match.ScannerNames.Any(value => GenericScannerNames.Contains(value))
+            || rule.Match.RequiredContextTerms.Any(value => GenericContextTerms.Contains(value)))
+            throw new InvalidDataException($"A regra {rule.Id} usa uma condição genérica; indique scanner e contexto específicos.");
+        if (rule.ErrorCodes.Count != 0 || rule.Symptoms.Count != 0)
+            throw new InvalidDataException($"A regra {rule.Id} não pode combinar match estrito com listas de códigos/sintomas legadas.");
+
+        if (rule.RequiredEvidence is null || rule.RequiredEvidence.Count is 0 or > MaximumConditionItems)
+            throw new InvalidDataException($"A regra {rule.Id} precisa declarar entre 1 e {MaximumConditionItems} evidências necessárias.");
+        ValidateList(rule.RequiredEvidence, "requiredEvidence", rule.Id, MaximumConditionItems, 250);
+
+        if (rule.Procedure is null)
+            throw new InvalidDataException($"A regra {rule.Id} precisa declarar procedimento no schema 1.1.");
+        ValidateText(rule.Procedure.DiagnosticAction, $"procedure.diagnosticAction ({rule.Id})", 1200);
+        ValidateText(rule.Procedure.CorrectiveAction, $"procedure.correctiveAction ({rule.Id})", 1200);
+        ValidateText(rule.Procedure.RequiredPrivilege, $"procedure.requiredPrivilege ({rule.Id})", 800);
+        ValidateText(rule.Procedure.Risk, $"procedure.risk ({rule.Id})", 800);
+        ValidateText(rule.Procedure.Backup, $"procedure.backup ({rule.Id})", 800);
+        ValidateText(rule.Procedure.Rollback, $"procedure.rollback ({rule.Id})", 800);
+        ValidateText(rule.Procedure.SourceLimitation, $"procedure.sourceLimitation ({rule.Id})", 1000);
+        if (!rule.Procedure.ManualOnly || !rule.Procedure.RequiresUserConfirmation)
+            throw new InvalidDataException($"A regra {rule.Id} só pode oferecer ação manual que exige confirmação explícita.");
+        if (rule.Procedure.RequiresElevation && !rule.Procedure.IsModifying)
+            throw new InvalidDataException($"A regra {rule.Id} não pode exigir elevação sem declarar ação modificadora.");
+        if (string.Equals(rule.Match.ExactErrorCode, "0x80073712", StringComparison.OrdinalIgnoreCase)
+            && (!rule.Procedure.IsModifying || !rule.Procedure.RequiresElevation
+            || !rule.Procedure.Rollback.Contains("indisponível", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("A regra 0x80073712 precisa permanecer privilegiada, modificadora e sem rollback disponível.");
+    }
+
+    private static void ValidateRequiredConditions(IReadOnlyList<string>? values, string field, string ruleId, int maximumLength)
+    {
+        if (values is null || values.Count is 0 or > MaximumConditionItems)
+            throw new InvalidDataException($"{field} da regra {ruleId} deve conter entre 1 e {MaximumConditionItems} itens.");
+        ValidateList(values, field, ruleId, MaximumConditionItems, maximumLength);
+        if (values.Any(value => !string.Equals(value, value.Trim(), StringComparison.Ordinal))
+            || values.Distinct(StringComparer.OrdinalIgnoreCase).Count() != values.Count)
+            throw new InvalidDataException($"{field} da regra {ruleId} não pode conter espaços externos ou itens duplicados.");
     }
 
     private static void ValidateList(IReadOnlyList<string>? values, string field, string ruleId, int maximumCount, int maximumLength)

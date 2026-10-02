@@ -18,9 +18,11 @@ Qualquer alteração futura deve adicionar um próximo passo sequencial, dentro 
 
 ## Importação e uso
 
-O schema do JSON é estrito e limitado: versão do schema, versão do pacote e regras com campos conhecidos, limite de tamanho/contagem/texto e referências HTTPS. A importação só armazena conteúdo como dados. Não há execução de código, download automático de referências, plugin dinâmico ou regra factual sem importação explícita.
+O JSON aceita schema 1.0 para compatibilidade e schema 1.1 para regras com aplicabilidade, condição de match contextual estrita, evidências necessárias e procedimento documentado. O 1.1 exige código HRESULT exato, scanner explícito e termos de contexto no mesmo achado; recusa código genérico, condição vazia/genérica e campos de comando/script. Pacotes continuam limitados a 512 KiB/500 regras, listas/texto limitados e referências HTTPS. A importação só armazena conteúdo como dados: não há execução de código, download de referências, plugin dinâmico ou regra ativa antes de importação explícita.
 
-`RecommendationEngine` lê a versão mais recente de cada regra por ID; histórico de versões continua no SQLite. Não há regras semeadas nesta entrega. Uma recomendação preserva o identificador/versão da regra, os scanners e as evidências literais que corresponderam.
+O piloto Microsoft está em `knowledge-packs/microsoft-windows-update-pilot.json`, mas não é carregado pelo banco nem pelo startup. Para usá-lo, abra a interface, selecione esse arquivo, revise versão/fonte/hash/quantidade e importe deliberadamente; a base permanece vazia até essa ação. A curadoria deriva das páginas Microsoft indicadas no próprio arquivo; URLs e publisher alegado não têm autenticidade criptográfica verificada. A extensão fica dentro do `PayloadJson` existente, portanto não altera colunas nem `PRAGMA user_version`.
+
+`RecommendationEngine` lê a versão mais recente de cada regra por ID; histórico de versões continua no SQLite. Não há regras semeadas. O piloto requer contexto junto do código exato; código isolado não ativa suas regras. Recomendações preservam identificador/versão, scanner e evidência literal. Ações são instruções declarativas: reinicialização exige confirmação manual; DISM é privilegiado/modificador, SFC só é indicado após sucesso do DISM e o rollback está indisponível conforme as fontes.
 
 ## Dados e privacidade
 

@@ -21,6 +21,26 @@ public enum MatchConfidence
 /// <summary>Referência declarada pela origem do pacote. O app não verifica automaticamente sua autenticidade.</summary>
 public sealed record KnowledgeReference(string Title, string Url);
 
+/// <summary>Condição estrita: código exato e contexto literal no mesmo achado do scanner indicado.</summary>
+public sealed record KnowledgeMatchCondition(
+    string ExactErrorCode,
+    IReadOnlyList<string> ScannerNames,
+    IReadOnlyList<string> RequiredContextTerms);
+
+/// <summary>Orientação declarativa; nunca é executada pela aplicação.</summary>
+public sealed record KnowledgeProcedure(
+    string DiagnosticAction,
+    string CorrectiveAction,
+    string RequiredPrivilege,
+    bool RequiresElevation,
+    string Risk,
+    string Backup,
+    string Rollback,
+    string SourceLimitation,
+    bool IsModifying,
+    bool RequiresUserConfirmation,
+    bool ManualOnly);
+
 /// <summary>Regra textual, inerte e versionada. Nenhum campo é tratado como código ou comando.</summary>
 public sealed record KnowledgeRule(
     string Id,
@@ -32,9 +52,13 @@ public sealed record KnowledgeRule(
     IReadOnlyList<string> Symptoms,
     IReadOnlyList<string> Causes,
     IReadOnlyList<string> Solutions,
-    IReadOnlyList<KnowledgeReference> References);
+    IReadOnlyList<KnowledgeReference> References,
+    string? Applicability = null,
+    KnowledgeMatchCondition? Match = null,
+    IReadOnlyList<string>? RequiredEvidence = null,
+    KnowledgeProcedure? Procedure = null);
 
-/// <summary>Envelope JSON suportado pelo importador (schema 1.0).</summary>
+/// <summary>Envelope JSON suportado pelo importador (schemas 1.0 e 1.1).</summary>
 public sealed record KnowledgePackage(
     string SchemaVersion,
     string Version,
@@ -62,7 +86,10 @@ public sealed record DiagnosticRecommendation(
     IReadOnlyList<string> Causes,
     IReadOnlyList<string> Solutions,
     IReadOnlyList<RecommendationEvidence> Evidence,
-    IReadOnlyList<KnowledgeReference> References);
+    IReadOnlyList<KnowledgeReference> References,
+    string? Applicability = null,
+    IReadOnlyList<string>? RequiredEvidence = null,
+    KnowledgeProcedure? Procedure = null);
 
 public sealed record RootCauseEvidence(
     string ScannerName,

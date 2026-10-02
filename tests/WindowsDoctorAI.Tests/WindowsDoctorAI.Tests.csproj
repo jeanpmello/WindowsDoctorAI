@@ -22,4 +22,7 @@
     <ProjectReference Include="../../src/WindowsDoctorAI.Repair/WindowsDoctorAI.Repair.csproj" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
+  <ItemGroup>
+    <None Include="../../knowledge-packs/**/*.json" Link="knowledge-packs/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

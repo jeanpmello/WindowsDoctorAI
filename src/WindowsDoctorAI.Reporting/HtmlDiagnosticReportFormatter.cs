@@ -59,8 +59,26 @@ public sealed class HtmlDiagnosticReportFormatter
             builder.Append("<article class=\"item\"><h3>").Append(E(recommendation.Title)).Append("</h3><p>").Append(E(recommendation.Domain)).Append(" · impacto informado: ").Append(E(Label(recommendation.Impact))).Append(" · força do match literal: ").Append(E(Label(recommendation.Confidence))).AppendLine("</p>");
             builder.AppendLine("<p class=\"muted\">A força do match literal não é probabilidade de causa ou de sucesso; impacto e referências são declarações do pacote, não verificadas pelo aplicativo.</p>");
             builder.Append("<p>").Append(E(recommendation.Explanation)).Append(" ").Append(E(recommendation.ConfidenceExplanation)).AppendLine("</p>");
+            if (!string.IsNullOrWhiteSpace(recommendation.Applicability))
+                builder.Append("<p><strong>Aplicabilidade declarada:</strong> ").Append(E(recommendation.Applicability)).AppendLine("</p>");
             AppendList(builder, "Causas descritas pela regra", recommendation.Causes);
             AppendList(builder, "Soluções descritas pela regra (não executadas)", recommendation.Solutions);
+            if (recommendation.RequiredEvidence is { Count: > 0 })
+                AppendList(builder, "Evidência necessária para aplicar a regra", recommendation.RequiredEvidence);
+            if (recommendation.Procedure is { } procedure)
+            {
+                builder.Append("<p><strong>Ação diagnóstica descrita (não executada):</strong> ").Append(E(procedure.DiagnosticAction)).AppendLine("</p>");
+                builder.Append("<p><strong>Ação corretiva manual (não executada):</strong> ").Append(E(procedure.CorrectiveAction)).AppendLine("</p>");
+                builder.Append("<p><strong>Privilégio:</strong> ").Append(E(procedure.RequiredPrivilege))
+                    .Append(" · elevação necessária: ").Append(procedure.RequiresElevation ? "sim" : "não")
+                    .Append(" · ação modificadora: ").Append(procedure.IsModifying ? "sim" : "não")
+                    .Append(" · confirmação explícita: ").Append(procedure.RequiresUserConfirmation ? "sim" : "não")
+                    .Append(" · somente manual: ").Append(procedure.ManualOnly ? "sim" : "não").AppendLine("</p>");
+                builder.Append("<p><strong>Risco declarado:</strong> ").Append(E(procedure.Risk)).AppendLine("</p>");
+                builder.Append("<p><strong>Backup:</strong> ").Append(E(procedure.Backup)).AppendLine("</p>");
+                builder.Append("<p><strong>Rollback:</strong> ").Append(E(procedure.Rollback)).AppendLine("</p>");
+                builder.Append("<p><strong>Limitação da fonte:</strong> ").Append(E(procedure.SourceLimitation)).AppendLine("</p>");
+            }
             builder.AppendLine("<p><strong>Evidências correspondentes</strong></p>");
             foreach (var evidence in recommendation.Evidence)
                 builder.Append("<p>").Append(E(evidence.Category)).Append(" / ").Append(E(evidence.ScannerName)).Append(" · ").Append(E(evidence.Title)).Append(" · indicador <code>").Append(E(evidence.MatchedIndicator)).Append("</code> · ").Append(E(evidence.Evidence)).AppendLine("</p>");
@@ -99,6 +117,7 @@ public sealed class HtmlDiagnosticReportFormatter
 
     private static void AppendList(StringBuilder builder, string title, IReadOnlyList<string> values)
     {
+        if (values.Count == 0) return;
         builder.Append("<p><strong>").Append(E(title)).AppendLine("</strong></p><ul>");
         foreach (var value in values) builder.Append("<li>").Append(E(value)).AppendLine("</li>");
         builder.AppendLine("</ul>");

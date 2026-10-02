@@ -21,6 +21,16 @@ public sealed class RecommendationEngine
             foreach (var finding in findings)
             {
                 var searchable = string.Join("\n", finding.Title, finding.Description, finding.Evidence);
+                if (rule.Match is { } strictMatch)
+                {
+                    if (!strictMatch.ScannerNames.Contains(finding.ScannerName, StringComparer.OrdinalIgnoreCase)
+                        || !strictMatch.RequiredContextTerms.All(term => ContainsPhrase(searchable, term))
+                        || !ContainsToken(searchable, strictMatch.ExactErrorCode))
+                        continue;
+                    matches.Add((finding, strictMatch.ExactErrorCode, true));
+                    continue;
+                }
+
                 var errorCode = rule.ErrorCodes.FirstOrDefault(code => ContainsToken(searchable, code));
                 if (!string.IsNullOrWhiteSpace(errorCode))
                 {
@@ -66,7 +76,10 @@ public sealed class RecommendationEngine
                 rule.Causes,
                 rule.Solutions,
                 evidence,
-                rule.References));
+                rule.References,
+                rule.Applicability,
+                rule.RequiredEvidence,
+                rule.Procedure));
         }
 
         return recommendations
@@ -78,7 +91,7 @@ public sealed class RecommendationEngine
 
     private static bool ContainsToken(string text, string token)
     {
-        var pattern = $"(?<![A-Za-z0-9]){Regex.Escape(token)}(?![A-Za-z0-9])";
+        var pattern = $"(?<![A-Za-z0-9_]){Regex.Escape(token)}(?![A-Za-z0-9_])";
         return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
     }
 
