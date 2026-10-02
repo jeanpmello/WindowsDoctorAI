@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Diagnostics;
 using WindowsDoctorAI.Domain;
@@ -35,6 +37,8 @@ public sealed class DiagnosticCompatibilityTests
     public void DiagnosticRegistrationExposesEveryScannerPluginThroughTheCommonContract()
     {
         var services = new ServiceCollection();
+        services.AddSingleton<ILogger<WindowsDiagnosticDataSource>>(
+            NullLogger<WindowsDiagnosticDataSource>.Instance);
         services.AddWindowsDiagnosticPlugins();
         using var provider = services.BuildServiceProvider();
 
