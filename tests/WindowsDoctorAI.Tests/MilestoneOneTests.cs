@@ -145,6 +145,16 @@ public sealed class RunComputerInventoryDiagnosticUseCaseTests
             return Task.CompletedTask;
         }
         public Task<DiagnosticRun?> GetLatestAsync(CancellationToken cancellationToken = default) => Task.FromResult(SavedRun);
+        public Task<int> DeleteCompletedBeforeAsync(DateTimeOffset cutoffUtc, CancellationToken cancellationToken = default) =>
+            Task.FromResult(SavedRun is { } run && run.CompletedAtUtc < cutoffUtc ? ClearSavedRun() : 0);
+        public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) => Task.FromResult(ClearSavedRun());
+
+        private int ClearSavedRun()
+        {
+            if (SavedRun is null) return 0;
+            SavedRun = null;
+            return 1;
+        }
     }
 }
 
@@ -162,8 +172,11 @@ public sealed class SqliteRepositoryTests
         var settings = new SqliteUserSettingsRepository(context);
 
         Assert.True((await settings.GetAsync()).SaveDiagnosticHistory);
-        await settings.SaveAsync(new UserSettings { SaveDiagnosticHistory = false });
-        Assert.False((await settings.GetAsync()).SaveDiagnosticHistory);
+        Assert.Equal(0, (await settings.GetAsync()).DiagnosticRetentionDays);
+        await settings.SaveAsync(new UserSettings { SaveDiagnosticHistory = false, DiagnosticRetentionDays = 90 });
+        var savedSettings = await settings.GetAsync();
+        Assert.False(savedSettings.SaveDiagnosticHistory);
+        Assert.Equal(90, savedSettings.DiagnosticRetentionDays);
 
         var now = DateTimeOffset.UtcNow;
         var result = new DiagnosticResult("Test", "Sistema", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
@@ -181,8 +194,8 @@ public sealed class SqliteRepositoryTests
         var restored = await history.GetLatestAsync();
         Assert.NotNull(restored);
         Assert.Equal(run.Id, restored.Id);
-        Assert.Equal("SQLITE-PC", restored.Inventory.ComputerName);
-        Assert.Equal("192.0.2.10", Assert.Single(restored.Inventory.IPv4Addresses));
+        Assert.Equal("[redigido]", restored.Inventory.ComputerName);
+        Assert.Empty(restored.Inventory.IPv4Addresses);
         Assert.Equal("Samsung 990 Pro", Assert.Single(restored.Inventory.PhysicalDisks).Model);
         Assert.Equal(92, restored.Report!.HealthScore!.Value.Value);
         Assert.Equal("Evidência sintética do teste", Assert.Single(restored.Report.Results).Evidence);

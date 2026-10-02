@@ -18,6 +18,7 @@ public sealed class HtmlDiagnosticReportFormatter
         ArgumentNullException.ThrowIfNull(recommendations);
         ArgumentNullException.ThrowIfNull(analysis);
         ArgumentNullException.ThrowIfNull(repairHistory);
+        run = DiagnosticPrivacyRedactor.Redact(run);
         var report = run.Report;
         var builder = new StringBuilder(8192);
         builder.AppendLine("<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");

@@ -50,7 +50,7 @@ dotnet test .\tests\WindowsDoctorAI.Tests\WindowsDoctorAI.Tests.csproj --configu
 dotnet run --project .\src\WindowsDoctorAI.App\WindowsDoctorAI.App.csproj --configuration Release
 ```
 
-O banco `windowsdoctorai.db` é criado em `%LOCALAPPDATA%\WindowsDoctorAI\`. Schema version 1 acompanha as tabelas de conhecimento e auditoria e atualiza bancos anteriores sem substituir histórico existente.
+O banco `windowsdoctorai.db` é criado em `%LOCALAPPDATA%\WindowsDoctorAI\`. Schema version 3 acompanha as tabelas de conhecimento, auditoria e retenção; as migrações preservam histórico existente.
 
 ## Testes e limites
 
@@ -60,7 +60,7 @@ No Linux é possível testar bibliotecas e SQLite com .NET 9. A validação de X
 
 ## Persistência e privacidade
 
-O histórico de diagnóstico é local e habilitado por padrão; pode conter nome/série do equipamento, usuário/IP, identificadores Plug and Play e mensagens de eventos. Relatórios HTML repetem evidências. Desativar o histórico impede novas gravações, mas não apaga registros existentes. SQLite não implica criptografia em repouso; consulte [Database](docs/Database.md) e [Security](docs/Security.md).
+O histórico de diagnóstico é local e habilitado por padrão; novas gravações redigem identificadores explícitos do inventário e omitem corpos brutos de mensagens de eventos, preservando códigos de erro. Retenção automática é opt-in e desativada por padrão; apagar o histórico requer confirmação e não remove arquivos HTML exportados nem outros dados. Registros antigos são preservados, mas a exportação HTML aplica redação. SQLite não implica criptografia em repouso nem apagamento físico seguro; consulte [Database](docs/Database.md) e [Security](docs/Security.md).
 
 ## Licença
 

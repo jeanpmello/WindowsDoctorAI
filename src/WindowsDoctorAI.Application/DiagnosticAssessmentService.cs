@@ -15,6 +15,7 @@ public sealed class DiagnosticAssessmentService(
     public async Task<string> CreateHtmlReportAsync(DiagnosticRun run, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(run);
+        run = DiagnosticPrivacyRedactor.Redact(run);
         var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(false);
         var recommendations = run.Report is null
             ? Array.Empty<DiagnosticRecommendation>()

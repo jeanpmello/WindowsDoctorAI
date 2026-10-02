@@ -32,4 +32,7 @@ public sealed record DiagnosticRun(
 public sealed record UserSettings
 {
     public bool SaveDiagnosticHistory { get; init; } = true;
+
+    /// <summary>Prazo em dias; zero conserva o histórico sem expurgo automático.</summary>
+    public int DiagnosticRetentionDays { get; init; }
 }

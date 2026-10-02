@@ -14,6 +14,7 @@ public sealed class UserSettingsEntity
 {
     public int Id { get; set; }
     public bool SaveDiagnosticHistory { get; set; }
+    public int DiagnosticRetentionDays { get; set; }
 }
 
 public sealed class KnowledgeRuleEntity
@@ -72,7 +73,7 @@ public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbConte
             entity.ToTable("UserSettings");
             entity.HasKey(settings => settings.Id);
             entity.Property(settings => settings.Id).ValueGeneratedNever();
-            entity.HasData(new UserSettingsEntity { Id = 1, SaveDiagnosticHistory = true });
+            entity.HasData(new UserSettingsEntity { Id = 1, SaveDiagnosticHistory = true, DiagnosticRetentionDays = 0 });
         });
         modelBuilder.Entity<KnowledgeRuleEntity>(entity =>
         {

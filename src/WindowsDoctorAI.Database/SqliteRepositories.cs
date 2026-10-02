@@ -34,6 +34,7 @@ public sealed class SqliteDiagnosticRunRepository(WindowsDoctorDbContext dbConte
     public async Task SaveAsync(DiagnosticRun run, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(run);
+        run = DiagnosticPrivacyRedactor.Redact(run);
         var payload = JsonSerializer.Serialize(run, InventoryJson.Options);
         dbContext.DiagnosticRuns.Add(new DiagnosticRunEntity
         {
@@ -51,6 +52,35 @@ public sealed class SqliteDiagnosticRunRepository(WindowsDoctorDbContext dbConte
             .FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
         return latest is null ? null : JsonSerializer.Deserialize<DiagnosticRun>(latest.PayloadJson, InventoryJson.Options);
     }
+
+    public Task<int> DeleteCompletedBeforeAsync(DateTimeOffset cutoffUtc, CancellationToken cancellationToken = default)
+    {
+        var cutoffMilliseconds = cutoffUtc.ToUniversalTime().ToUnixTimeMilliseconds();
+        return DeleteInTransactionAsync(
+            () => dbContext.DiagnosticRuns.Where(run => run.CompletedAtUnixMilliseconds < cutoffMilliseconds)
+                .ExecuteDeleteAsync(cancellationToken),
+            cancellationToken);
+    }
+
+    public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) =>
+        DeleteInTransactionAsync(() => dbContext.DiagnosticRuns.ExecuteDeleteAsync(cancellationToken), cancellationToken);
+
+    private async Task<int> DeleteInTransactionAsync(Func<Task<int>> delete, CancellationToken cancellationToken)
+    {
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var deleted = await delete().ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return deleted;
+        }
+        catch
+        {
+            try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch { /* Preserve the original database exception. */ }
+            throw;
+        }
+    }
 }
 
 public sealed class SqliteUserSettingsRepository(WindowsDoctorDbContext dbContext) : IUserSettingsRepository
@@ -58,12 +88,20 @@ public sealed class SqliteUserSettingsRepository(WindowsDoctorDbContext dbContex
     public async Task<UserSettings> GetAsync(CancellationToken cancellationToken = default)
     {
         var entity = await dbContext.UserSettings.AsNoTracking().SingleOrDefaultAsync(settings => settings.Id == 1, cancellationToken).ConfigureAwait(false);
-        return entity is null ? new UserSettings() : new UserSettings { SaveDiagnosticHistory = entity.SaveDiagnosticHistory };
+        return entity is null
+            ? new UserSettings()
+            : new UserSettings
+            {
+                SaveDiagnosticHistory = entity.SaveDiagnosticHistory,
+                DiagnosticRetentionDays = entity.DiagnosticRetentionDays
+            };
     }
 
     public async Task SaveAsync(UserSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        if (settings.DiagnosticRetentionDays is < 0 or > 3650)
+            throw new ArgumentOutOfRangeException(nameof(settings), "A retenção deve ser 0 (desativada) ou entre 1 e 3650 dias.");
         var entity = await dbContext.UserSettings.SingleOrDefaultAsync(value => value.Id == 1, cancellationToken).ConfigureAwait(false);
         if (entity is null)
         {
@@ -71,6 +109,7 @@ public sealed class SqliteUserSettingsRepository(WindowsDoctorDbContext dbContex
             dbContext.UserSettings.Add(entity);
         }
         entity.SaveDiagnosticHistory = settings.SaveDiagnosticHistory;
+        entity.DiagnosticRetentionDays = settings.DiagnosticRetentionDays;
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 }
@@ -283,7 +322,7 @@ public static class DatabaseServiceCollectionExtensions
 /// <summary>Schema local evolui em passos idempotentes; PRAGMA user_version identifica o último passo concluído.</summary>
 public static class WindowsDoctorDatabaseMigrator
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     public static async Task MigrateAsync(WindowsDoctorDbContext context, CancellationToken cancellationToken = default)
     {
@@ -308,6 +347,10 @@ public static class WindowsDoctorDatabaseMigrator
                     "ImportedAtUnixMilliseconds" INTEGER NOT NULL,
                     CONSTRAINT "PK_KnowledgeRules" PRIMARY KEY ("RuleId", "RuleVersion"));
                 CREATE INDEX IF NOT EXISTS "IX_KnowledgeRules_RuleId_RuleVersion" ON "KnowledgeRules" ("RuleId", "RuleVersion");
+                CREATE TABLE IF NOT EXISTS "UserSettings" (
+                    "Id" INTEGER NOT NULL CONSTRAINT "PK_UserSettings" PRIMARY KEY,
+                    "SaveDiagnosticHistory" INTEGER NOT NULL);
+                INSERT OR IGNORE INTO "UserSettings" ("Id", "SaveDiagnosticHistory") VALUES (1, 1);
                 CREATE TABLE IF NOT EXISTS "KnowledgeBaseVersions" (
                     "Version" TEXT NOT NULL CONSTRAINT "PK_KnowledgeBaseVersions" PRIMARY KEY,
                     "Source" TEXT NOT NULL,
@@ -336,6 +379,13 @@ public static class WindowsDoctorDatabaseMigrator
                     """, cancellationToken).ConfigureAwait(false);
             }
 
+            if (!await HasUserSettingsRetentionColumnAsync(context, cancellationToken).ConfigureAwait(false))
+            {
+                await context.Database.ExecuteSqlRawAsync("""
+                    ALTER TABLE "UserSettings" ADD COLUMN "DiagnosticRetentionDays" INTEGER NOT NULL DEFAULT 0;
+                    """, cancellationToken).ConfigureAwait(false);
+            }
+
             await context.Database.ExecuteSqlRawAsync($"PRAGMA user_version = {CurrentVersion};", cancellationToken).ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -355,6 +405,21 @@ public static class WindowsDoctorDatabaseMigrator
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             if (string.Equals(reader.GetString(1), "AuditMetadataJson", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static async Task<bool> HasUserSettingsRetentionColumnAsync(
+        WindowsDoctorDbContext context,
+        CancellationToken cancellationToken)
+    {
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "PRAGMA table_info(\"UserSettings\");";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (string.Equals(reader.GetString(1), "DiagnosticRetentionDays", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;

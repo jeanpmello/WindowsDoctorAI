@@ -36,6 +36,8 @@ public interface IDiagnosticRunRepository
 {
     Task SaveAsync(DiagnosticRun run, CancellationToken cancellationToken = default);
     Task<DiagnosticRun?> GetLatestAsync(CancellationToken cancellationToken = default);
+    Task<int> DeleteCompletedBeforeAsync(DateTimeOffset cutoffUtc, CancellationToken cancellationToken = default);
+    Task<int> DeleteAllAsync(CancellationToken cancellationToken = default);
 }
 
 public interface IUserSettingsRepository

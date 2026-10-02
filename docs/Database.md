@@ -1,22 +1,24 @@
 # Banco de dados
 
-**Estado:** EF Core 9 e SQLite local; o schema tem versão independente, rastreada por `PRAGMA user_version`. A versão atual é 2. A aplicação não usa migrations EF Core geradas; `WindowsDoctorDatabaseMigrator` aplica passos SQL incrementais idempotentes.
+**Estado:** EF Core 9 e SQLite local; o schema tem versão independente, rastreada por `PRAGMA user_version`. A versão atual é 3. A aplicação não usa migrations EF Core geradas; `WindowsDoctorDatabaseMigrator` aplica passos SQL incrementais idempotentes.
 
 ## Localização e atualização
 
 A aplicação cria `windowsdoctorai.db` em `%LOCALAPPDATA%\WindowsDoctorAI\`. Inicialização preserva `EnsureCreated` para a fundação original e, em seguida, roda as migrações próprias. Um banco antigo do Milestone 1/2 é tratado como versão 0: as tabelas novas são criadas com `IF NOT EXISTS`, sem apagar execuções ou preferências. Um banco com versão superior à suportada é recusado para evitar downgrade silencioso.
+
+O passo 3 adiciona `UserSettings.DiagnosticRetentionDays` como inteiro `NOT NULL DEFAULT 0`; a migração também cria `UserSettings` com defaults caso um banco legado mínimo não tenha a tabela. Preferências preexistentes e payloads de execuções são preservados. O zero significa retenção desativada; nenhuma linha histórica é apagada pela migração.
 
 Qualquer alteração futura deve adicionar um próximo passo sequencial, dentro de transação, com teste de migração a partir do schema anterior. Não renumere nem edite migrações já publicadas.
 
 ## Tabelas
 
 - **`DiagnosticRuns`** — ID, data de conclusão para ordenação e JSON com execução/inventário/relatório do scanner.
-- **`UserSettings`** — preferência local `SaveDiagnosticHistory`.
+- **`UserSettings`** — `SaveDiagnosticHistory` e `DiagnosticRetentionDays` (0 conserva indefinidamente; prazo ativo é expresso em dias).
 - **`KnowledgeRules`** — uma linha por `RuleId` + `RuleVersion`; guarda versão do pacote, payload declarativo JSON e data de importação. Os payloads anteriores são preservados; regra com mesmo ID/versão e conteúdo diferente é recusada.
 - **`KnowledgeBaseVersions`** — versão do pacote, origem declarada, SHA-256 do arquivo JSON, quantidade de regras e data de importação. O hash permite detectar repetição/conflito de conteúdo; não certifica assinatura, autoria nem validade de referência.
 - **`RepairHistory`** — uma linha por `RepairExecutionId` (o ID primário existente), com proposta, status, risco declarado, confirmação e detalhes limitados. `AuditMetadataJson` acrescenta versão/alvo/condições declaradas, hash do plano, ID e horário do consentimento, ação, início efetivo, estado da verificação pós-condições e `RelatedRepairExecutionId` em rollback. Não há coluna de comando/script.
 
-A migração 2 adiciona `AuditMetadataJson` com valor padrão `{}` e preserva linhas do schema 1. O repositório grava a preparação antes de chamar um plugin e atualiza a mesma linha ao sinalizar início e ao concluir; uma interrupção após o início deixa o último estado persistido para revisão. Se a gravação prévia falhar, o plugin não é chamado.
+A migração 2 adiciona `AuditMetadataJson` com valor padrão `{}` e preserva linhas do schema 1. A migração 3 adiciona a preferência de retenção com default desativado, cria a tabela `UserSettings` quando ausente e preserva registros/preferências existentes. O repositório de reparos grava a preparação antes de chamar um plugin e atualiza a mesma linha ao sinalizar início e ao concluir; uma interrupção após o início deixa o último estado persistido para revisão. Se a gravação prévia falhar, o plugin não é chamado.
 
 ## Importação e uso
 
@@ -28,6 +30,6 @@ O piloto Microsoft está em `knowledge-packs/microsoft-windows-update-pilot.json
 
 ## Dados e privacidade
 
-O payload histórico existente pode conter nome/modelo/série do computador, usuário/domínio, endereços de rede, identificadores de dispositivos e mensagens de eventos. Evidências em relatórios podem repetir essas informações. Regras importadas guardam também suas referências e descrições. A origem e o conteúdo de um pacote devem ser revisados antes da importação.
+Payloads antigos podem conter valores não minimizados, inclusive nome/série do computador, usuário/domínio, endereços IP e mensagens de eventos; a migração os preserva. As novas gravações passam por `DiagnosticPrivacyRedactor`, que redige `ComputerName`, `SerialNumber`, `UserName`, `Domain` e `Bios.SerialNumber`, limpa endereços IPv4/IPv6 de inventário/adaptadores e substitui o corpo de descrições dos eventos de `Event Viewer`/falhas de `Windows Update`. Códigos de erro no formato HRESULT `0x` + oito dígitos, log/ID/nível/horário e outras evidências estruturadas são preservados. A exportação HTML aplica a mesma redação também a payloads legados, sem alterá-los no banco. Textos declarativos de regras importadas e propostas de reparo não são tratados como fontes confiáveis; não armazenar credenciais e revisar antes de compartilhar.
 
-Desabilitar **Salvar diagnósticos no histórico local** impede novas gravações de diagnósticos; não apaga registros existentes. A auditoria de reparo é local. SQLite não fornece criptografia em repouso por si só; não armazenar senhas, tokens ou chaves. Rotina de retenção, exportação e exclusão de histórico ainda não está implementada.
+Desabilitar **Salvar diagnósticos no histórico local** impede novas gravações, mas não apaga registros existentes. Retenção é opt-in e desligada por padrão (`0`); a UI oferece 30, 90, 180 ou 365 dias. Quando ativa, apaga somente linhas de `DiagnosticRuns` cuja conclusão UTC seja anterior ao prazo, ao iniciar o app e ao salvar preferências. **Apagar todo o histórico** exige confirmação e remove todas as linhas de `DiagnosticRuns` dentro de transação; não afeta arquivos HTML, `RepairHistory`, preferências ou base de conhecimento. A operação é exclusão lógica da linha SQLite, não sobrescrita segura do espaço livre. SQLite não fornece criptografia em repouso por si só; não armazenar senhas, tokens ou chaves.

@@ -46,6 +46,7 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                     services.AddWindowsDoctorInfrastructure(databasePath);
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();
                     services.AddTransient<RunComputerInventoryDiagnosticUseCase>();
+                    services.AddTransient<DiagnosticHistoryMaintenanceService>();
                     services.AddSingleton<RecommendationEngine>();
                     services.AddSingleton<RootCauseAnalyzer>();
                     services.AddSingleton<HtmlDiagnosticReportFormatter>();
@@ -67,6 +68,12 @@ public partial class App : global::Microsoft.UI.Xaml.Application
             try
             {
                 await _host.Services.InitializeWindowsDoctorDatabaseAsync();
+                await using var scope = _host.Services.CreateAsyncScope();
+                var settings = await scope.ServiceProvider.GetRequiredService<IUserSettingsRepository>().GetAsync();
+                var purged = await scope.ServiceProvider.GetRequiredService<DiagnosticHistoryMaintenanceService>()
+                    .PurgeExpiredAsync(settings, DateTimeOffset.UtcNow);
+                if (purged > 0)
+                    _host.Services.GetRequiredService<ILogger<App>>().LogInformation("A retenção local removeu {Count} execução(ões) diagnóstica(s) expirada(s).", purged);
             }
             catch (Exception exception)
             {

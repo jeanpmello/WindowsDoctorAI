@@ -293,7 +293,7 @@ public sealed class RepairEngineTests
         var loaded = Assert.Single(await audit.GetRecentAsync(10));
         Assert.Equal(oldId, loaded.RepairExecutionId);
 
-        Assert.Equal(2, WindowsDoctorDatabaseMigrator.CurrentVersion);
+        Assert.Equal(3, WindowsDoctorDatabaseMigrator.CurrentVersion);
         Assert.Equal("legacy.item", loaded.RepairId);
         Assert.Equal("legacy record", loaded.Details);
         Assert.Equal(1, loaded.PlanVersion);
