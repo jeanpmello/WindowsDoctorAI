@@ -14,6 +14,7 @@ Este roadmap distingue componentes implementados de integração visual, valida�
 - Execução paralela conforme segurança declarada, isolamento de falhas, medição e Health Score heurístico.
 - Dashboard, cobertura, evidências, persistência do relatório e testes com fontes substitutas.
 - Scanners somente de leitura; sem modificações de sistema.
+- No Event Viewer genérico, o evento com provider `Microsoft-Windows-WindowsUpdateClient`, channel `Microsoft-Windows-WindowsUpdateClient/Operational` e HRESULT `0x800F0831` é suprimido na origem, independentemente do Event ID; não gera Finding, Recommendation ou estado Healthy nem conteúdo para histórico/HTML. É uma supressão temporária da tupla exata até haver chave confiável de correlação CBS↔EventRecord.
 - O scanner de backup consulta `Get-WBBackupSet` pelo Windows PowerShell existente e mostra apenas contagem, data e tipo minimizados; presença de metadados não comprova integridade nem capacidade de restauração.
 - Há somente um planejador isolado de prévia sintética: exige conjunto/versão/volume/item conhecidos na lista sintética fornecida, origem e destino alternativo absolutos distintos, bloqueia sobrescrita e fixa a política `CreateCopy`. Não está ligado à UI nem a uma fonte real de itens WSB, não consulta o filesystem e não gera comando copiável.
 - Os testes Linux usam runner falso e fixtures JSON sintéticas. Eles validam parsing/estados e não simulam nem certificam Windows Server 2019 real.

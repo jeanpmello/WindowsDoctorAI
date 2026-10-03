@@ -146,6 +146,45 @@ public sealed class DiagnosticPrivacyRetentionTests
     }
 
     [Fact]
+    public async Task EventViewerSuppressionKeepsBlockedHresultOutOfNewHistoryAndHtmlReports()
+    {
+        const string blockedHresult = "0x800F0831";
+        const string rawMessage = "Install failed with HRESULT 0x800F0831; synthetic event payload";
+        var source = new SingleEventViewerEventSource(new DiagnosticEvent(
+            20,
+            "Microsoft-Windows-WindowsUpdateClient/Operational",
+            "Microsoft-Windows-WindowsUpdateClient",
+            2,
+            FixedNow,
+            rawMessage));
+        var results = await new EventViewerDiagnosticScanner(source).ScanAsync();
+        var report = new DiagnosticReport(results, FixedNow.AddSeconds(-1), FixedNow, TimeSpan.FromSeconds(1), null);
+        var run = new DiagnosticRun(Guid.NewGuid(), report.StartedAtUtc, report.CompletedAtUtc,
+            report.Duration, new ComputerInventory(), report);
+
+        Assert.DoesNotContain(results, result => result.Status == DiagnosticStatus.Finding);
+        Assert.DoesNotContain(results, result => result.Status == DiagnosticStatus.Healthy
+            && result.Title == "Event Viewer/Windows Update");
+
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        var repository = new SqliteDiagnosticRunRepository(context);
+        await repository.SaveAsync(run);
+
+        var payload = await context.DiagnosticRuns.Select(item => item.PayloadJson).SingleAsync();
+        AssertPrivacyValuesAbsent(payload, blockedHresult, rawMessage);
+        var loaded = await repository.GetLatestAsync();
+        Assert.NotNull(loaded);
+        var assessment = new DiagnosticAssessmentService(
+            new EmptyKnowledgeRepository(), new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
+        var html = await assessment.CreateHtmlReportAsync(loaded);
+        AssertPrivacyValuesAbsent(html, blockedHresult, rawMessage);
+    }
+
+    [Fact]
     public async Task CurrentAndLegacyPluginPayloadsAreRedactedInSqliteDisplayAndFullHtmlFlow()
     {
         const string host = "PRIVATE-HOST-726";
@@ -514,6 +553,36 @@ public sealed class DiagnosticPrivacyRetentionTests
             ProbeResult<IReadOnlyList<DiagnosticEvent>>.Unavailable("Não utilizado pelo teste."),
             ProbeResult<IReadOnlyList<DiagnosticEvent>>.Unavailable("Não utilizado pelo teste."),
             ProbeResult<IReadOnlyList<DiagnosticEvent>>.Unavailable("Não utilizado pelo teste.")));
+    }
+
+    private sealed class SingleEventViewerEventSource(DiagnosticEvent updateEvent) : IWindowsDiagnosticDataSource
+    {
+        private static readonly ProbeResult<IReadOnlyList<DiagnosticEvent>> EmptyEvents =
+            ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available([]);
+
+        public Task<WindowsUpdateProbe> ReadWindowsUpdateAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new WindowsUpdateProbe(
+                ProbeResult<IReadOnlyList<PendingWindowsUpdate>>.Unavailable("Não utilizado pelo teste."),
+                ProbeResult<bool>.Unavailable("Não utilizado pelo teste."),
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Unavailable("Não utilizado pelo teste.")));
+
+        public Task<ProbeResult<IReadOnlyList<ServiceDiagnosticInfo>>> ReadServicesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProbeResult<IReadOnlyList<ServiceDiagnosticInfo>>.Unavailable("Não utilizado pelo teste."));
+
+        public Task<ProbeResult<IReadOnlyList<DeviceDiagnosticInfo>>> ReadDevicesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(ProbeResult<IReadOnlyList<DeviceDiagnosticInfo>>.Unavailable("Não utilizado pelo teste."));
+
+        public Task<DiskProbe> ReadDisksAsync(CancellationToken cancellationToken = default) => Task.FromResult(new DiskProbe(
+            ProbeResult<IReadOnlyList<DiskSmartStatus>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiskHealthInfo>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiskVolumeInfo>>.Unavailable("Não utilizado pelo teste."),
+            ProbeResult<IReadOnlyList<DiskTemperatureInfo>>.Unavailable("Não utilizado pelo teste.")));
+
+        public Task<EventLogProbe> ReadEventLogsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new EventLogProbe(
+                EmptyEvents,
+                EmptyEvents,
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available([updateEvent])));
     }
 
     private sealed class SelectedKnowledgeRepository(KnowledgeRule rule) : IKnowledgeRepository

@@ -332,6 +332,66 @@ public sealed class DiagnosticScannerPluginTests
     }
 
     [Fact]
+    public async Task EventViewerSuppressesOnlyExactUnattributedCbsTupleWithoutFindingHealthyOrRecommendation()
+    {
+        const string provider = "Microsoft-Windows-WindowsUpdateClient";
+        const string channel = "Microsoft-Windows-WindowsUpdateClient/Operational";
+        var now = DateTimeOffset.UtcNow;
+        var source = new FakeWindowsDiagnosticDataSource
+        {
+            EventLogs = new EventLogProbe(
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available([]),
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available([]),
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available(
+                [
+                    new DiagnosticEvent(20, channel, provider, 2, now, "Install failed with HRESULT 0x800F0831"),
+                    new DiagnosticEvent(999, "microsoft-windows-windowsupdateclient/OPERATIONAL",
+                        "MICROSOFT-WINDOWS-WINDOWSUPDATECLIENT", 1, now, "Install failed with HRESULT 0x800f0831")
+                ]))
+        };
+
+        var results = await new EventViewerDiagnosticScanner(source).ScanAsync();
+        var report = new DiagnosticReport(results, now, now, TimeSpan.Zero, null);
+        var rule = new KnowledgeRule("synthetic-event-viewer", 1, "Event Viewer", "Falha de instalação",
+            KnowledgeImpact.Moderate, [], ["Install failed"], [], [],
+            [new KnowledgeReference("Fixture sintética", "https://example.invalid/event-viewer")]);
+
+        Assert.DoesNotContain(results, result => result.Status == DiagnosticStatus.Finding);
+        Assert.DoesNotContain(results, result => result.Status == DiagnosticStatus.Healthy
+            && result.Title == "Event Viewer/Windows Update");
+        Assert.Empty(new RecommendationEngine().Recommend(report, [rule]));
+    }
+
+    [Theory]
+    [InlineData("0x800F0830", "Microsoft-Windows-WindowsUpdateClient", "Microsoft-Windows-WindowsUpdateClient/Operational")]
+    [InlineData("0x800F0831", "OtherProvider", "Microsoft-Windows-WindowsUpdateClient/Operational")]
+    [InlineData("0x800F0831", "Microsoft-Windows-WindowsUpdateClient", "Microsoft-Windows-WindowsUpdateClient/Other")]
+    [InlineData("0x800F08310", "Microsoft-Windows-WindowsUpdateClient", "Microsoft-Windows-WindowsUpdateClient/Operational")]
+    public async Task EventViewerKeepsNearMissesInFindingAndRecommendationFlow(string hresult, string provider, string channel)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var source = new FakeWindowsDiagnosticDataSource
+        {
+            EventLogs = new EventLogProbe(
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available([]),
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available([]),
+                ProbeResult<IReadOnlyList<DiagnosticEvent>>.Available(
+                [new DiagnosticEvent(21, channel, provider, 2, now, $"Install failed with HRESULT {hresult}")]))
+        };
+
+        var results = await new EventViewerDiagnosticScanner(source).ScanAsync();
+        var finding = Assert.Single(results, result => result.Status == DiagnosticStatus.Finding);
+        var report = new DiagnosticReport(results, now, now, TimeSpan.Zero, null);
+        var rule = new KnowledgeRule("synthetic-event-viewer", 1, "Event Viewer", "Falha de instalação",
+            KnowledgeImpact.Moderate, [], ["Install failed"], [], [],
+            [new KnowledgeReference("Fixture sintética", "https://example.invalid/event-viewer")]);
+        var recommendation = Assert.Single(new RecommendationEngine().Recommend(report, [rule]));
+
+        Assert.Contains(hresult, finding.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(recommendation.Evidence);
+    }
+
+    [Fact]
     public async Task UnsupportedPlatformReportsUnavailableForEveryPluginAndNeverClaimsHealth()
     {
         var source = new UnsupportedWindowsDiagnosticDataSource();
