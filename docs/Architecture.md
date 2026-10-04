@@ -1,6 +1,6 @@
 # Arquitetura
 
-**Estado:** Milestones 1–2 e os componentes centrais do Milestone 3 estão implementados no repositório. A execução WinUI 3, compilação XAML e APIs nativas ainda precisam de validação em Windows; este documento não representa certificação.
+**Estado:** Milestones 1–2 e os componentes centrais do Milestone 3 estão implementados no repositório. O workflow de CI Windows compila a solução e executa testes automatizados, mas não é end-to-end; execução visual, APIs nativas e o contrato runtime do WSB ainda exigem validação em host real. Este documento não representa certificação.
 
 ## Produto e fronteira arquitetural
 
@@ -28,13 +28,15 @@ As dependências continuam apontando para contratos e domínio. `Domain` não co
 
 `DiagnosticResult` representa a coleta dos scanners; `Unavailable` e `NotVerified` não são estados saudáveis. `SourceMetadata` mantém separadamente providers de evento conhecidos e normalizados; neste incremento, apenas `WindowsUpdateClient` é allowlist. O Health Score existente é heurístico: 100 menos 25 por achado crítico e 8 por aviso, limitado a 0–100, e não é calculado quando não há verificações confirmadas. Não é uma medida de saúde global.
 
-Os plugins existentes consultam Windows Update, Services, Drivers, Disk e Event Viewer em modo de leitura. Os limites específicos de APIs, permissões, SMART, cobertura e volume permanecem descritos nos resultados e na documentação do Milestone 2.
+Os plugins existentes consultam Windows Update, Services, Drivers, Disk, Event Viewer e Windows Server Backup em modo de leitura. Os limites específicos de APIs, permissões, SMART, cobertura e volume permanecem descritos nos resultados e na documentação do Milestone 2.
 
-O diagnóstico de Windows Server Backup expõe apenas contagem, data e tipo minimizados; não fornece vínculo entre conjunto, versão, volume e item. `SyntheticFileRecoveryPreviewPlanner` é uma exceção deliberadamente isolada: valida seleções contra dados sintéticos fornecidos pelo chamador e produz somente texto/modelo descritivo com política fixa `CreateCopy`. Não está registrado na composição nem na UI, não consulta backup ou filesystem, não gera comando e não executa recuperação. Isso não representa suporte de restauração.
+O scanner de Windows Server Backup expõe metadados minimizados. Separadamente, a UI consulta o catálogo de versões somente sob demanda e mostra ID opaco, data UTC, tipo normalizado e contagem de volumes quando disponível; a lista é temporária e não entra no histórico, no HTML ou nos logs. Respostas fora do schema/limites, com IDs repetidos ou formato runtime inesperado descartam o catálogo inteiro (fail-closed), sem exibição parcial. Os testes usam runner falso e JSON sintético; o contrato runtime ainda não foi validado em Windows Server 2019.
+
+`SyntheticFileRecoveryPreviewPlanner` permanece deliberadamente isolado: valida seleções contra dados sintéticos fornecidos pelo chamador e produz somente texto/modelo descritivo com política fixa `CreateCopy`. Não está registrado na composição nem na UI, não consulta backup ou filesystem, não gera comando e não executa recuperação. O catálogo de metadados não fornece suporte de restauração.
 
 ## Knowledge Engine e recomendações
 
-`KnowledgeRule` modela identificador e versão, domínio, título, impacto, códigos, sintomas, causas, soluções e referências HTTPS. O importador preserva compatibilidade com schema JSON `1.0`/`1.1` e aceita `1.2`, limitado a 512 KiB/500 regras, com listas/texto limitados, enum textual, referências HTTPS e rejeição de propriedades não mapeadas. Regras estritas declaram aplicabilidade, código HRESULT exato, scanner, contexto específico no mesmo achado, evidência requerida e procedimento manual com privilégio/risco/backup/rollback/limitação da fonte. No schema 1.2, contexto também pode exigir providers estruturados canônicos da allowlist. Caminhos locais, campos desconhecidos de comando/script e padrões conhecidos de comando/injeção são rejeitados. O JSON é dado declarativo e nunca é interpretado como código, caminho de execução ou comando.
+`KnowledgeRule` modela identificador e versão, domínio, título, impacto, códigos, sintomas, causas, soluções e referências HTTPS. O importador aceita schemas JSON `1.0`, `1.1`, `1.2` e `1.3`, limitado a 512 KiB/500 regras, com listas/texto limitados, enum textual, referências HTTPS e rejeição de propriedades não mapeadas. Regras estritas declaram aplicabilidade, código HRESULT exato, scanner, contexto específico no mesmo achado, evidência requerida e procedimento manual com privilégio/risco/backup/rollback/limitação da fonte. O schema 1.2 permite providers estruturados canônicos da allowlist; o 1.3 também permite tipos de evidência estruturada da allowlist. Caminhos locais, campos desconhecidos de comando/script e padrões conhecidos de comando/injeção são rejeitados. O JSON é dado declarativo e nunca é interpretado como código, caminho de execução ou comando.
 
 Não há regras semeadas no banco, inclusive para `0x80070005`; esse identificador só poderá gerar recomendação quando uma regra for explicitamente importada com referências declaradas. O hash SHA-256 identifica o conteúdo importado e permite idempotência, mas **não autentica** a origem. O aplicativo não verifica automaticamente se a URL ou a alegação da regra é confiável.
 
@@ -48,9 +50,9 @@ O modelo atual do scanner não fornece uma timeline confiável de eventos histó
 
 ## Relatórios
 
-`DiagnosticAssessmentService.CreateHtmlReportAsync` reúne o relatório da execução, recomendações do banco local, correlações e histórico de propostas de reparo. O HTML inclui resumo, Health Score, cobertura/resultados, evidências, impacto/confiança explicados, referências declaradas e histórico. A renderização codifica texto não confiável e não carrega scripts ou estilos remotos.
+`DiagnosticAssessmentService.CreateHtmlReportAsync` reúne o relatório da execução, recomendações do banco local e correlações. O HTML inclui resumo, Health Score, cobertura/resultados, evidências, impacto/confiança explicados e referências declaradas; não consulta nem agrega `RepairHistory`, que permanece na trilha SQLite sem vínculo confiável com a execução diagnóstica. A renderização codifica texto não confiável e não carrega scripts ou estilos remotos.
 
-O serviço HTML está disponível na camada de aplicação, mas ainda não existe fluxo de exportação/seleção de arquivo na interface WinUI. Não há geração PDF nesta entrega; imprimir/salvar como PDF no navegador é uma opção externa, não uma capacidade implementada. Relatórios podem conter evidências locais potencialmente identificáveis; compartilhamento e retenção exigem decisão do usuário.
+A interface WinUI já permite gerar e salvar HTML da execução atual ou mais recente, no destino escolhido pelo usuário. Não há geração PDF nesta entrega; imprimir/salvar como PDF no navegador é uma opção externa, não uma capacidade implementada. Relatórios podem conter evidências locais potencialmente identificáveis; compartilhamento e retenção exigem decisão do usuário.
 
 ## Framework de reparos
 
@@ -64,8 +66,8 @@ Um plugin real futuro exigirá revisão própria de pré-condições, verificaç
 
 ## Validação pendente
 
-- Compilar a solution e validar XAML/WinUI com Windows App SDK em Windows.
-- Exercitar WUA, Registro, WMI, Event Viewer, SMART e permissões em versões e hardware representativos.
+- Executar visualmente a UI WinUI e exercitar WUA, Registro, WMI, Event Viewer, SMART e permissões em versões e hardware representativos; a compilação da solução já faz parte do workflow de CI Windows.
+- Validar a consulta real `Get-WBBackupSet` e os tipos dos objetos WSB em Windows Server 2019; a suíte atual usa runner falso e fixtures sintéticas e não é E2E.
 - Validar regras importadas com fontes reconhecidas, processo de revisão e critérios de impacto/confiança.
-- Definir interface de importação/exportação HTML, retenção/remoção e política de privacidade para relatórios.
+- Revisar retenção/remoção e política de privacidade para relatórios, inclusive antes de compartilhá-los.
 - Projetar identidade, autorização, transporte, auditoria e proteção de dados separadamente antes de qualquer edição Enterprise.

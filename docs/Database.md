@@ -12,6 +12,8 @@ O passo 4 define o histórico como opt-in: atualiza `UserSettings.SaveDiagnostic
 
 Qualquer alteração futura deve adicionar um próximo passo sequencial, dentro de transação, com teste de migração a partir do schema anterior. Não renumere nem edite migrações já publicadas.
 
+O teste `FailedMigrationFromSchemaV2RollsBackCompletelyAndCanBeRetried` usa SQLite em memória e injeta uma falha sintética durante a atualização a partir do schema 2. Verifica que a transação reverte integralmente (versão, objetos e linhas legadas preservados) e que, removida a falha, a nova tentativa conclui até o schema 4. É cobertura de rollback/retry de migração, não uma simulação de falha física ou corrupção do arquivo de banco.
+
 ## Tabelas
 
 - **`DiagnosticRuns`** — ID, data de conclusão para ordenação e JSON com execução/inventário/relatório do scanner.
@@ -35,5 +37,7 @@ A importação CBS é manual e offline, sem depender de execução diagnóstica,
 ## Dados e privacidade
 
 Payloads antigos podem conter valores não minimizados, inclusive nome/série do computador, usuário/domínio, endereços IP e mensagens de eventos; a migração os preserva. Novas gravações passam por `DiagnosticPrivacyRedactor`, que trata todos os campos textuais de resultados de scanners/plugins e minimiza identificadores conhecidos, e-mails, caminhos, IPs, GUIDs e atribuições comuns de credenciais. Nos eventos de `Event Viewer`/falhas de `Windows Update`, o corpo da mensagem é substituído por uma representação segura com códigos HRESULT e metadados permitidos, como log, ID e nível; a origem do evento é armazenada separadamente somente quando seu provider corresponde à allowlist e é normalizada para um identificador canônico. A exibição de achados e toda geração HTML aplicam a mesma política também a payloads legados, sem reescrevê-los no banco. Redação ocorre antes do HTML encoding; codificação não é tratada como substituta de minimização. Textos arbitrários de regras importadas e propostas de reparo não são fontes confiáveis; não armazenar credenciais e revisar antes de compartilhar.
+
+A consulta sob demanda do catálogo de versões WSB mantém somente um snapshot temporário em memória; ID opaco, data UTC, tipo e contagem opcional de volumes não são gravados em `DiagnosticRuns`/`RepairHistory`, no HTML ou nos logs. A presença no catálogo não representa recuperação nem altera o schema SQLite.
 
 Desabilitar **Salvar diagnósticos no histórico local** impede novas gravações, mas não apaga registros existentes. Retenção é independente e conserva por padrão (`0`); a UI oferece 30, 90, 180 ou 365 dias. Um prazo diferente de zero só é salvo após confirmação explícita. A confirmação autoriza o expurgo imediato das linhas de `DiagnosticRuns` cuja conclusão UTC seja anterior ao limite; cancelamento não salva as preferências nem remove dados. O aplicativo não expurga por idade ao iniciar. **Apagar todo o histórico** também exige confirmação e remove todas as linhas de `DiagnosticRuns` dentro de transação; não afeta arquivos HTML já exportados, `RepairHistory`, preferências ou base de conhecimento. Arquivos HTML pré-existentes permanecem fora da retenção e não são apagados automaticamente. A operação SQLite é exclusão lógica da linha, não sobrescrita segura do espaço livre. SQLite não fornece criptografia em repouso por si só; não armazenar senhas, tokens ou chaves.
