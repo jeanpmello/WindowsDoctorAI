@@ -33,6 +33,10 @@
                 <TextBlock Text="Diagnóstico, resultados e inventário deste computador" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
+            <Border Style="{StaticResource InventoryCardStyle}" Padding="14">
+                <TextBlock Text="O histórico de diagnósticos é local e opcional: a gravação vem desligada por padrão. Para ativá-la, abra Configurações. Nenhum diagnóstico será salvo enquanto a opção estiver desligada." TextWrapping="Wrap" />
+            </Border>
+
             <Grid ColumnDefinitions="2*,*" ColumnSpacing="16">
                 <Border Style="{StaticResource InventoryCardStyle}">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="18">
@@ -47,7 +51,7 @@
                         </StackPanel>
                         <StackPanel Grid.Column="1" MinWidth="128" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="4">
                             <TextBlock Text="{Binding HealthScore}" FontSize="40" FontWeight="SemiBold" HorizontalAlignment="Center" TextWrapping="Wrap" />
-                            <TextBlock Text="Health Score" HorizontalAlignment="Center" FontWeight="SemiBold" />
+                            <TextBlock Text="Pontuação de saúde" HorizontalAlignment="Center" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding HealthScoreDescription}" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" />
                         </StackPanel>
                     </Grid>
@@ -55,7 +59,10 @@
                 <Border Grid.Column="1" Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="8" VerticalAlignment="Center">
                         <TextBlock Text="Última execução" Style="{StaticResource SectionTitleStyle}" />
-                        <TextBlock Text="{Binding LastDiagnosticText}" TextWrapping="Wrap" />
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding LastDiagnosticText}" TextWrapping="Wrap" />
+                            <ProgressRing Grid.Column="1" IsActive="{Binding IsLoadingHistory}" Width="22" Height="22" />
+                        </Grid>
                     </StackPanel>
                 </Border>
             </Grid>

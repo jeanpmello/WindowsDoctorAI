@@ -23,15 +23,16 @@ internal partial class HomeViewModel(
     private static readonly string[] DashboardCategories = ["Sistema", "Drivers", "Hardware", "Rede", "Segurança"];
 
     [ObservableProperty] private bool _isScanning;
+    [ObservableProperty] private bool _isLoadingHistory;
     [ObservableProperty] private string _statusMessage = "Inicie um diagnóstico para coletar o inventário e executar as verificações locais.";
-    [ObservableProperty] private string _lastDiagnosticText = "Nenhum diagnóstico registrado nesta sessão.";
+    [ObservableProperty] private string _lastDiagnosticText = "Nenhum diagnóstico anterior carregado.";
     [ObservableProperty] private string _healthScore = "Não calculado";
-    [ObservableProperty] private string _healthScoreDescription = "O score aparece quando pelo menos uma verificação produz evidência observável.";
+    [ObservableProperty] private string _healthScoreDescription = "A pontuação é heurística e não representa a saúde global do computador; só aparece após evidência observável.";
     [ObservableProperty] private string _criticalProblemsText = "—";
     [ObservableProperty] private string _warningsText = "—";
     [ObservableProperty] private string _diagnosticDurationText = "—";
     [ObservableProperty] private string _categoriesSummary = "As categorias serão preenchidas após a execução.";
-    [ObservableProperty] private string _findingsSummary = "Nenhuma execução nesta sessão.";
+    [ObservableProperty] private string _findingsSummary = "Nenhum resultado carregado nesta sessão.";
     [ObservableProperty] private string _computerName = "Não coletado";
     [ObservableProperty] private string _manufacturerModel = "Não coletado";
     [ObservableProperty] private string _serialNumber = "Não coletado";
@@ -406,13 +407,23 @@ internal partial class HomeViewModel(
 
     public async Task LoadLatestAsync(CancellationToken cancellationToken = default)
     {
-        ResetCbsLogAnalysis("Selecione manualmente um CBS.log para uma observação offline e isolada.");
-        UpdateCbsLogCommandState();
-        await RefreshKnowledgeBaseStatusAsync(cancellationToken);
+        IsLoadingHistory = true;
+        StatusMessage = "Carregando histórico local...";
+        LastDiagnosticText = "Carregando histórico local...";
+        FindingsSummary = "Carregando resultados do histórico local...";
         try
         {
+            ResetCbsLogAnalysis("Selecione manualmente um CBS.log para uma observação offline e isolada.");
+            UpdateCbsLogCommandState();
+            await RefreshKnowledgeBaseStatusAsync(cancellationToken);
             var latest = await history.GetLatestAsync(cancellationToken);
-            if (latest is null) return;
+            if (latest is null)
+            {
+                LastDiagnosticText = "Nenhum diagnóstico anterior encontrado no histórico local.";
+                FindingsSummary = "Nenhum resultado anterior está disponível no histórico local.";
+                StatusMessage = "Nenhum diagnóstico anterior encontrado no histórico local. Execute um diagnóstico para ver resultados.";
+                return;
+            }
             _currentRun = latest;
             CanExportHtmlReport = true;
             DisplayInventory(latest.Inventory);
@@ -425,7 +436,13 @@ internal partial class HomeViewModel(
         catch (Exception exception)
         {
             logger.LogWarning("O último diagnóstico não pôde ser carregado do histórico local; detalhes omitidos por privacidade.");
+            LastDiagnosticText = "Histórico local indisponível.";
+            FindingsSummary = "Não foi possível carregar resultados do histórico local.";
             StatusMessage = DiagnosticPrivacyMessages.HistoryLoadFailure(exception);
+        }
+        finally
+        {
+            IsLoadingHistory = false;
         }
     }
 
@@ -436,7 +453,7 @@ internal partial class HomeViewModel(
         if (report is null)
         {
             HealthScore = "Não calculado";
-            HealthScoreDescription = "Este registro não contém verificações do Diagnostic Engine.";
+            HealthScoreDescription = "Este registro não contém verificações do Diagnostic Engine. A pontuação é heurística e não representa a saúde global do computador.";
             CriticalProblemsText = "—";
             WarningsText = "—";
             CategoriesSummary = "Diagnóstico de rede e segurança não incluído; os scanners do Milestone 2 cobrem sistema, drivers e hardware.";
@@ -446,8 +463,8 @@ internal partial class HomeViewModel(
 
         HealthScore = report.HealthScore is { } score ? score.Value.ToString(CultureInfo.InvariantCulture) : "Não calculado";
         HealthScoreDescription = report.HealthScore is null
-            ? "Nenhuma verificação foi confirmada; itens indisponíveis ou não verificados não contam como saúde."
-            : $"Baseado em {report.VerifiedChecks} verificação(ões) observada(s); {report.UnavailableChecks + report.NotVerifiedChecks} indisponível(is)/não verificada(s).";
+            ? "Nenhuma verificação foi confirmada; itens indisponíveis ou não verificados não contam. A pontuação é heurística e não representa a saúde global do computador."
+            : $"Pontuação heurística baseada em {report.VerifiedChecks} verificação(ões) observada(s); {report.UnavailableChecks + report.NotVerifiedChecks} indisponível(is)/não verificada(s). Não representa a saúde global do computador.";
         CriticalProblemsText = report.CriticalProblems.ToString(CultureInfo.InvariantCulture);
         WarningsText = report.Warnings.ToString(CultureInfo.InvariantCulture);
         CategoriesSummary = FormatCategories(report);
