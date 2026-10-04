@@ -29,5 +29,7 @@
   <ItemGroup>
     <None Include="../../knowledge-packs/**/*.json" Link="knowledge-packs/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures/**/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../packaging/Start-WindowsDoctorAI.cmd" Link="Fixtures/Alpha/Start-WindowsDoctorAI.cmd" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../.github/workflows/alpha-package.yml" Link="Fixtures/Alpha/alpha-package.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

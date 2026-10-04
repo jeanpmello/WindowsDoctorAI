@@ -74,6 +74,9 @@ jobs:
           if ($missing.Count -gt 0) {
             throw "Publish self-contained incompleto; faltam dependências: $($missing -join ', ')"
           }
+          if (-not (Test-Path '.\packaging\Start-WindowsDoctorAI.cmd')) {
+            throw 'O launcher Alpha não foi encontrado em packaging/.'
+          }
 
           $stream = [System.IO.File]::OpenRead($exe)
           try {
@@ -115,7 +118,13 @@ jobs:
           if (Test-Path $packageDir) { Remove-Item -Path $packageDir -Recurse -Force }
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item -Path (Join-Path $publishDir '*') -Destination $packageDir -Recurse -Force
+          Copy-Item -Path '.\packaging\Start-WindowsDoctorAI.cmd' -Destination (Join-Path $packageDir 'Start-WindowsDoctorAI.cmd') -Force
           Copy-Item -Path '.\docs\alpha-windows-11-x64.md' -Destination (Join-Path $packageDir 'README-ALPHA.md') -Force
+          $requiredPackageFiles = @('WindowsDoctorAI.App.exe', 'Start-WindowsDoctorAI.cmd', 'README-ALPHA.md')
+          $missingPackageFiles = @($requiredPackageFiles | Where-Object { -not (Test-Path (Join-Path $packageDir $_)) })
+          if ($missingPackageFiles.Count -gt 0) {
+            throw "Pacote Alpha incompleto; faltam arquivos: $($missingPackageFiles -join ', ')"
+          }
           Write-Host "Pacote validado: $($requiredFiles.Count) dependências obrigatórias, PE x64 e sem segredo detectável. O workflow não aplica assinatura própria."
 
       - name: Upload Windows 11 x64 Alpha ZIP artifact

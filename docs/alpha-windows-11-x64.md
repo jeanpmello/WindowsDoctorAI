@@ -7,13 +7,13 @@ Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow `Alph
 1. No repositório, abra **Actions** e selecione **Windows CI**.
 2. Escolha **Run workflow**, selecione a branch preparada para a Alpha e inicie a execução. Nessa branch, o workflow CI chama o workflow reutilizável `Alpha package (Windows 11 x64)` após o build e os testes.
 3. Aguarde os jobs `Build and test (Windows)` e `Package Alpha artifact` concluírem com sucesso. Baixe `WindowsDoctorAI-alpha-win11-x64` da execução; o download do artefato é um ZIP.
-4. Extraia-o para uma pasta local e execute `WindowsDoctorAI.App.exe`.
+4. Extraia todo o ZIP para uma pasta local e execute `Start-WindowsDoctorAI.cmd`. O launcher confere o runtime VC++ x64 antes de abrir o app e deixa uma mensagem na janela do terminal se o pré-requisito estiver ausente ou se o processo retornar erro. O executável `WindowsDoctorAI.App.exe` continua disponível, mas iniciar pelo launcher é preferível para facilitar o diagnóstico.
 
 Use esta build somente em **Windows 11 x64**. Windows 10, Windows Server (incluindo Server 2019) e Windows em ARM não são alvos afirmados ou validados por esta Alpha. O workflow não assina o executável em nome do projeto nem declara identidade de editor ou confiança de certificado; o Windows pode identificá-lo como aplicativo de publicador desconhecido. Não existe etapa para instalar ou confiar em certificado.
 
 ## Dependências e limites
 
-O publish é self-contained para o runtime .NET e para o Windows App SDK 1.7: esses runtimes seguem junto com o app. Conforme o [guia Microsoft de distribuição unpackaged](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/unpackage-winui-app), apps unpackaged também exigem o **Microsoft Visual C++ Redistributable x64**. Se o Windows indicar que falta uma DLL do runtime VC++, instale o pacote x64 oficial mais recente pela [página Microsoft do VC++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist); essa dependência não é incluída nem instalada silenciosamente pelo artefato.
+O publish é self-contained para o runtime .NET e para o Windows App SDK 1.7: esses runtimes seguem junto com o app. Conforme o [guia Microsoft de distribuição unpackaged](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/unpackage-winui-app), apps unpackaged também exigem o **Microsoft Visual C++ Redistributable x64**. O launcher confere o registro de instalação do runtime x64 e, se não o detectar, para antes de abrir o app e aponta para a [página oficial da Microsoft do VC++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist). Ele não baixa, instala nem altera componentes; a dependência não está incluída no ZIP. Se a checagem indicar ausência, siga as instruções oficiais para obter o pacote x64 mais recente e só prossiga se optar por instalá-lo.
 
 Esta é uma Alpha, não uma declaração de compatibilidade de produção. Os scanners disponíveis são somente de leitura: **não há reparo automático nem alteração do Windows**. Diagnósticos e consultas de hardware/nativas precisam de validação em hosts Windows 11 reais. O comportamento do Windows Server Backup runtime não foi validado em Windows Server 2019 e não é prometido nesta build.
 
@@ -23,7 +23,7 @@ O app é local. A IA não tem provedor ativo, e o inventário não é enviado a 
 
 ## Enviar feedback
 
-Abra uma [issue no WindowsDoctorAI](https://github.com/jeanpmello/WindowsDoctorAI/issues) e informe a versão/build do Windows 11, o que tentou fazer, o resultado esperado e o que ocorreu. Inclua uma mensagem de erro ou trecho de log apenas depois de remover nomes de usuário, caminhos pessoais, identificadores do computador, números de série e outros dados privados. Não envie logs completos, dumps, tokens, senhas ou dados de backup.
+Abra uma [issue no WindowsDoctorAI](https://github.com/jeanpmello/WindowsDoctorAI/issues) e informe a versão/build do Windows 11, o que tentou fazer, o resultado esperado e o que ocorreu. Se a caixa de inicialização for exibida, informe somente o código técnico mostrado. Não envie logs completos, dumps, tokens, senhas, identificadores do computador ou dados de backup.
 
 ## Base de distribuição
 
