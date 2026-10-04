@@ -89,10 +89,11 @@ public partial class App : global::Microsoft.UI.Xaml.Application
             _mainWindow.Closed += MainWindow_Closed;
             _mainWindow.Activate();
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             _host?.Services.GetService<ILogger<App>>()?.LogCritical("A inicialização do Windows Doctor AI falhou; detalhes omitidos por privacidade.");
-            throw;
+            StartupFailureDialog.Show(exception.HResult);
+            Environment.Exit(1);
         }
     }
 
