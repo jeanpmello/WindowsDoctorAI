@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Domain;
 
@@ -86,13 +88,18 @@ public interface IRepairPlugin
 }
 
 /// <summary>Orquestrador auditável. A composição do app não registra plugin que altere o sistema.</summary>
-public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAuditLog auditLog)
+public sealed class RepairEngine(
+    IEnumerable<IRepairPlugin> plugins,
+    IRepairAuditLog auditLog,
+    IRepairPreconditionEvaluator preconditionEvaluator,
+    IRepairProposalAllowlist allowlist)
 {
     private readonly IReadOnlyDictionary<string, IRepairPlugin> _plugins = plugins
         .ToDictionary(plugin => plugin.Proposal.Id, StringComparer.OrdinalIgnoreCase);
 
     public IReadOnlyList<RepairProposal> GetProposals() => _plugins.Values
         .Select(plugin => plugin.Proposal)
+        .Where(IsWellFormedAllowlistedPlan)
         .OrderBy(proposal => proposal.Title, StringComparer.CurrentCultureIgnoreCase)
         .ToArray();
 
@@ -109,6 +116,15 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
                 "A proposta não está catalogada por um plugin confiável registrado.").ConfigureAwait(false);
 
         var proposal = plugin.Proposal;
+        if (!IsWellFormedAllowlistedPlan(proposal))
+        {
+            var rejectedPlan = CreateRecord(executionId, proposal, RepairExecutionStatus.Declined, false,
+                DateTimeOffset.UtcNow, "O plano não corresponde a uma operação tipada permitida; nenhuma ação foi iniciada.",
+                RepairAction.Execute, null, consent);
+            await auditLog.SaveAsync(rejectedPlan, CancellationToken.None).ConfigureAwait(false);
+            return rejectedPlan;
+        }
+
         if (consent is null || !consent.IsBoundTo(proposal, RepairAction.Execute))
         {
             var details = consent is null
@@ -120,21 +136,72 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
             return declined;
         }
 
+        IReadOnlyList<RepairConditionResult> preconditionResults;
+        try
+        {
+            preconditionResults = await preconditionEvaluator.EvaluateAsync(
+                proposal, RepairAction.Execute, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            preconditionResults = NotEvaluated(proposal.StructuredPreconditions);
+            var cancelledBeforePreparation = CreateRecord(executionId, proposal, RepairExecutionStatus.Cancelled, true,
+                DateTimeOffset.UtcNow, "Validação cancelada antes do início; nenhum efeito foi iniciado.",
+                RepairAction.Execute, null, consent, preconditionResults);
+            if (!await auditLog.TrySaveConsentAttemptAsync(cancelledBeforePreparation, CancellationToken.None).ConfigureAwait(false))
+                return await SaveReplayAttemptAsync(executionId, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+            return cancelledBeforePreparation;
+        }
+        catch (Exception)
+        {
+            preconditionResults = NotEvaluated(proposal.StructuredPreconditions);
+        }
+
+        if (!AreConditionsVerified(proposal.StructuredPreconditions, preconditionResults))
+        {
+            var blocked = CreateRecord(executionId, proposal, RepairExecutionStatus.Declined, true,
+                DateTimeOffset.UtcNow, "Pré-condições estruturadas ausentes, falsas ou não verificadas; nenhuma ação foi iniciada.",
+                RepairAction.Execute, null, consent, preconditionResults);
+            if (!await auditLog.TrySaveConsentAttemptAsync(blocked, CancellationToken.None).ConfigureAwait(false))
+                return await SaveReplayAttemptAsync(executionId, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+            return blocked;
+        }
+
         var now = DateTimeOffset.UtcNow;
         var entry = CreateRecord(executionId, proposal, RepairExecutionStatus.Prepared, true, now,
             "Consentimento validado; aguardando o plugin sinalizar início antes de qualquer efeito.",
-            RepairAction.Execute, null, consent);
+            RepairAction.Execute, null, consent, preconditionResults);
 
-        // Persistência prévia é uma barreira: se ela falhar, o plugin não é chamado.
-        await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+        // Reserva de uso único e estado Prepared são atômicos; se a persistência falhar, o plugin não é chamado.
+        if (!await auditLog.TrySaveConsentAttemptAsync(entry, CancellationToken.None).ConfigureAwait(false))
+            return await SaveReplayAttemptAsync(executionId, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
         var context = new RepairExecutionContext(executionId, RepairAction.Execute, null, async () =>
         {
+            IReadOnlyList<RepairConditionResult> startConditions;
+            try
+            {
+                startConditions = await preconditionEvaluator.EvaluateAsync(
+                    proposal, RepairAction.Execute, null, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                startConditions = NotEvaluated(proposal.StructuredPreconditions);
+            }
+            if (!AreConditionsVerified(proposal.StructuredPreconditions, startConditions))
+            {
+                entry = Finish(entry, RepairExecutionStatus.Declined,
+                    "Pré-condições tornaram-se ausentes, falsas ou obsoletas depois de Prepared e antes de Started; nenhum efeito foi iniciado.", false)
+                    with { PreconditionResults = startConditions };
+                await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+                throw new PreconditionsRejectedException();
+            }
             entry = entry with
             {
                 Status = RepairExecutionStatus.Started,
                 ExecutionStarted = true,
                 CompletedAtUtc = DateTimeOffset.UtcNow,
-                Details = "O plugin sinalizou início; o resultado ainda não está concluído."
+                Details = "O plugin sinalizou início após revalidar as pré-condições; o resultado ainda não está concluído.",
+                PreconditionResults = startConditions
             };
             await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
         });
@@ -154,24 +221,28 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
                 entry = FinishFromPluginResult(entry, result, postconditions, RepairAction.Execute);
             }
         }
+        catch (PreconditionsRejectedException)
+        {
+            // A tentativa Prepared já foi atualizada para Declined; nenhum executor foi iniciado.
+        }
         catch (OperationCanceledException)
         {
-            entry = Finish(entry, RepairExecutionStatus.Cancelled,
+            entry = Finish(entry, context.ExecutionStarted ? RepairExecutionStatus.Inconclusive : RepairExecutionStatus.Cancelled,
                 context.ExecutionStarted
-                    ? "A execução foi cancelada após o início; o efeito pode ser parcial ou inconclusivo."
+                    ? "A execução foi cancelada após Started; o efeito pode ser parcial ou inconclusivo. Nenhum rollback automático foi tentado."
                     : "A tentativa foi cancelada antes do início do plugin; nenhum efeito foi confirmado.",
                 context.ExecutionStarted);
         }
         catch (NotSupportedException exception)
         {
             entry = Finish(entry,
-                context.ExecutionStarted ? RepairExecutionStatus.Failed : RepairExecutionStatus.NotImplemented,
+                context.ExecutionStarted ? RepairExecutionStatus.Inconclusive : RepairExecutionStatus.NotImplemented,
                 SafeExceptionDetails(exception, context.ExecutionStarted ? "após o início" : "antes do início"),
                 context.ExecutionStarted);
         }
         catch (Exception exception)
         {
-            entry = Finish(entry, RepairExecutionStatus.Failed,
+            entry = Finish(entry, context.ExecutionStarted ? RepairExecutionStatus.Inconclusive : RepairExecutionStatus.Failed,
                 SafeExceptionDetails(exception, context.ExecutionStarted ? "após o início" : "antes do início"),
                 context.ExecutionStarted);
         }
@@ -220,13 +291,18 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
                 .ConfigureAwait(false);
 
         var proposal = plugin.Proposal;
+        if (!IsWellFormedAllowlistedPlan(proposal))
+            return await SaveUnqualifiedRollbackAsync(rollbackAttemptId, proposal.Id,
+                "O plano de rollback não corresponde a uma operação tipada permitida.", repairExecutionId,
+                consent, source, RepairExecutionStatus.Declined).ConfigureAwait(false);
+
         if (!proposal.SupportsRollback)
             return await SaveUnqualifiedRollbackAsync(rollbackAttemptId, proposal.Id,
                 "O plano não declara suporte a rollback; nenhuma ação foi iniciada.", repairExecutionId,
                 consent, source, RepairExecutionStatus.NotImplemented).ConfigureAwait(false);
 
         if (string.IsNullOrEmpty(source.PlanFingerprint)
-            || !string.Equals(source.PlanFingerprint, consent?.PlanFingerprint, StringComparison.Ordinal)
+            || !string.Equals(source.PlanFingerprint, RepairConsent.FingerprintFor(proposal, RepairAction.Execute), StringComparison.Ordinal)
             || consent is null
             || !consent.IsBoundTo(proposal, RepairAction.Rollback, repairExecutionId))
         {
@@ -236,18 +312,61 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
         }
 
         var now = DateTimeOffset.UtcNow;
+        IReadOnlyList<RepairConditionResult> preconditionResults;
+        try
+        {
+            preconditionResults = await preconditionEvaluator.EvaluateAsync(
+                proposal, RepairAction.Rollback, repairExecutionId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            preconditionResults = NotEvaluated(proposal.StructuredRollbackPreconditions);
+        }
+
+        if (!AreConditionsVerified(proposal.StructuredRollbackPreconditions, preconditionResults))
+        {
+            var blocked = CreateRecord(rollbackAttemptId, proposal, RepairExecutionStatus.Declined, true, now,
+                "Pré-condições estruturadas de rollback ausentes, falsas ou não verificadas; nenhuma ação foi iniciada.",
+                RepairAction.Rollback, repairExecutionId, consent, preconditionResults);
+            if (!await auditLog.TrySaveConsentAttemptAsync(blocked, CancellationToken.None).ConfigureAwait(false))
+                return await SaveReplayAttemptAsync(rollbackAttemptId, proposal, RepairAction.Rollback,
+                    repairExecutionId, consent).ConfigureAwait(false);
+            return blocked;
+        }
+
         var entry = CreateRecord(rollbackAttemptId, proposal, RepairExecutionStatus.Prepared, true, now,
             "Consentimento de rollback validado para a execução original; aguardando início do plugin.",
-            RepairAction.Rollback, repairExecutionId, consent);
-        await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+            RepairAction.Rollback, repairExecutionId, consent, preconditionResults);
+        if (!await auditLog.TrySaveConsentAttemptAsync(entry, CancellationToken.None).ConfigureAwait(false))
+            return await SaveReplayAttemptAsync(rollbackAttemptId, proposal, RepairAction.Rollback,
+                repairExecutionId, consent).ConfigureAwait(false);
         var context = new RepairExecutionContext(rollbackAttemptId, RepairAction.Rollback, repairExecutionId, async () =>
         {
+            IReadOnlyList<RepairConditionResult> startConditions;
+            try
+            {
+                startConditions = await preconditionEvaluator.EvaluateAsync(
+                    proposal, RepairAction.Rollback, repairExecutionId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                startConditions = NotEvaluated(proposal.StructuredRollbackPreconditions);
+            }
+            if (!AreConditionsVerified(proposal.StructuredRollbackPreconditions, startConditions))
+            {
+                entry = Finish(entry, RepairExecutionStatus.Declined,
+                    "Pré-condições de rollback tornaram-se ausentes, falsas ou obsoletas antes de Started; nenhum efeito foi iniciado.", false)
+                    with { PreconditionResults = startConditions };
+                await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+                throw new PreconditionsRejectedException();
+            }
             entry = entry with
             {
                 Status = RepairExecutionStatus.Started,
                 ExecutionStarted = true,
                 CompletedAtUtc = DateTimeOffset.UtcNow,
-                Details = $"O plugin sinalizou início do rollback da execução {repairExecutionId:D}; resultado pendente."
+                Details = $"O plugin sinalizou início do rollback da execução {repairExecutionId:D} após revalidar pré-condições; resultado pendente.",
+                PreconditionResults = startConditions
             };
             await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
         });
@@ -267,23 +386,27 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
                 entry = FinishFromPluginResult(entry, result, postconditions, RepairAction.Rollback);
             }
         }
+        catch (PreconditionsRejectedException)
+        {
+            // A tentativa Prepared já foi atualizada para Declined; nenhum executor foi iniciado.
+        }
         catch (OperationCanceledException)
         {
-            entry = Finish(entry, RepairExecutionStatus.Cancelled,
+            entry = Finish(entry, context.ExecutionStarted ? RepairExecutionStatus.Inconclusive : RepairExecutionStatus.Cancelled,
                 context.ExecutionStarted
-                    ? "O rollback foi cancelado após o início; o estado resultante pode ser parcial ou inconclusivo."
+                    ? "O rollback foi cancelado após Started; o estado pode ser parcial ou inconclusivo. Nenhum rollback adicional foi tentado."
                     : "O rollback foi cancelado antes do início do plugin.", context.ExecutionStarted);
         }
         catch (NotSupportedException exception)
         {
             entry = Finish(entry,
-                context.ExecutionStarted ? RepairExecutionStatus.RollbackFailed : RepairExecutionStatus.NotImplemented,
+                context.ExecutionStarted ? RepairExecutionStatus.Inconclusive : RepairExecutionStatus.NotImplemented,
                 SafeExceptionDetails(exception, context.ExecutionStarted ? "durante rollback já iniciado" : "antes do início do rollback"),
                 context.ExecutionStarted);
         }
         catch (Exception exception)
         {
-            entry = Finish(entry, RepairExecutionStatus.RollbackFailed,
+            entry = Finish(entry, context.ExecutionStarted ? RepairExecutionStatus.Inconclusive : RepairExecutionStatus.RollbackFailed,
                 SafeExceptionDetails(exception, context.ExecutionStarted ? "durante rollback já iniciado" : "antes do início do rollback"),
                 context.ExecutionStarted);
         }
@@ -359,8 +482,8 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
         RepairConsent? consent = null)
     {
         var now = DateTimeOffset.UtcNow;
-        var entry = new RepairHistoryRecord(executionId, proposalId, "Proposta não catalogada",
-            status, RepairRiskLevel.Unknown, false, false, now, now, details)
+        var entry = new RepairHistoryRecord(executionId, DiagnosticPrivacyRedactor.RedactText(proposalId), "Proposta não catalogada",
+            status, RepairRiskLevel.Unknown, false, false, now, now, DiagnosticPrivacyRedactor.RedactText(details))
         {
             Action = action,
             RelatedRepairExecutionId = relatedExecutionId,
@@ -372,6 +495,21 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
         return entry;
     }
 
+    private async Task<RepairHistoryRecord> SaveReplayAttemptAsync(
+        Guid executionId,
+        RepairProposal proposal,
+        RepairAction action,
+        Guid? relatedExecutionId,
+        RepairConsent consent)
+    {
+        var replay = CreateRecord(executionId, proposal, RepairExecutionStatus.Declined, true,
+            DateTimeOffset.UtcNow,
+            "Este consentimento já foi consumido por outra tentativa; replay bloqueado antes de qualquer efeito.",
+            action, relatedExecutionId, consent);
+        await auditLog.SaveAsync(replay, CancellationToken.None).ConfigureAwait(false);
+        return replay;
+    }
+
     private static RepairHistoryRecord CreateRecord(
         Guid executionId,
         RepairProposal proposal,
@@ -381,22 +519,116 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
         string details,
         RepairAction action,
         Guid? relatedExecutionId,
-        RepairConsent? consent) =>
-        new(executionId, proposal.Id, action == RepairAction.Rollback ? $"Rollback: {proposal.Title}" : proposal.Title,
+        RepairConsent? consent,
+        IReadOnlyList<RepairConditionResult>? preconditionResults = null) =>
+        new(executionId, proposal.Id, DiagnosticPrivacyRedactor.RedactText(
+                action == RepairAction.Rollback ? $"Rollback: {proposal.Title}" : proposal.Title),
             status, proposal.Risk, userConfirmed, proposal.SupportsRollback, now, now, details)
         {
             PlanVersion = proposal.PlanVersion,
-            Target = proposal.Target,
-            Preconditions = (proposal.Preconditions ?? Array.Empty<string>()).ToArray(),
-            Postconditions = (proposal.Postconditions ?? Array.Empty<string>()).ToArray(),
-            RollbackPreconditions = (proposal.RollbackPreconditions ?? Array.Empty<string>()).ToArray(),
-            RollbackPostconditions = (proposal.RollbackPostconditions ?? Array.Empty<string>()).ToArray(),
+            Target = DiagnosticPrivacyRedactor.RedactText(proposal.Target),
+            Preconditions = (proposal.Preconditions ?? Array.Empty<string>()).Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
+            Postconditions = (proposal.Postconditions ?? Array.Empty<string>()).Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
+            RollbackPreconditions = (proposal.RollbackPreconditions ?? Array.Empty<string>()).Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
+            RollbackPostconditions = (proposal.RollbackPostconditions ?? Array.Empty<string>()).Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
             Action = action,
             RelatedRepairExecutionId = relatedExecutionId,
             ConsentId = consent?.ConsentId,
             ConsentConfirmedAtUtc = consent?.ConfirmedAtUtc,
-            PlanFingerprint = consent?.PlanFingerprint ?? string.Empty
+            PlanFingerprint = consent?.PlanFingerprint ?? string.Empty,
+            ProposalKind = proposal.Kind,
+            OperationVersion = proposal.OperationVersion,
+            DiagnosticRunId = proposal.DiagnosticRunId,
+            FindingIdentity = proposal.FindingIdentity,
+            RuleId = proposal.RuleId,
+            RuleVersion = proposal.RuleVersion,
+            EvidenceFingerprint = proposal.EvidenceFingerprint,
+            RedactedEvidence = DiagnosticPrivacyRedactor.RedactText(proposal.RedactedEvidence),
+            StructuredPreconditions = proposal.StructuredPreconditions.ToArray(),
+            StructuredPostconditions = proposal.StructuredPostconditions.ToArray(),
+            StructuredRollbackPreconditions = proposal.StructuredRollbackPreconditions.ToArray(),
+            StructuredRollbackPostconditions = proposal.StructuredRollbackPostconditions.ToArray(),
+            PreconditionResults = (preconditionResults ?? Array.Empty<RepairConditionResult>()).ToArray()
         };
+
+    private bool IsWellFormedAllowlistedPlan(RepairProposal proposal)
+    {
+        if (proposal is null || proposal.Kind != RepairProposalKind.NoOpSimulation
+            || !Enum.IsDefined(proposal.Kind) || proposal.OperationVersion < 1 || proposal.PlanVersion < 1
+            || proposal.DiagnosticRunId == Guid.Empty || proposal.RuleVersion < 1
+            || proposal.Risk == RepairRiskLevel.Unknown || string.IsNullOrWhiteSpace(proposal.Target)
+            || string.IsNullOrWhiteSpace(proposal.RuleId) || !IsSha256Fingerprint(proposal.FindingIdentity)
+            || !IsValidEvidenceFingerprint(proposal.RedactedEvidence, proposal.EvidenceFingerprint)
+            || !allowlist.TryGetDefinition(proposal.RuleId, proposal.RuleVersion, out var definition)
+            || definition is null || definition.Kind != proposal.Kind
+            || definition.PlanVersion != proposal.PlanVersion || definition.OperationVersion != proposal.OperationVersion
+            || !(string.Equals(proposal.Id, definition.ProposalId, StringComparison.Ordinal)
+                || proposal.Id.StartsWith(definition.ProposalId + ".", StringComparison.Ordinal))
+            || !string.Equals(proposal.Title, definition.Title, StringComparison.Ordinal)
+            || !string.Equals(proposal.Description, definition.Description, StringComparison.Ordinal)
+            || !string.Equals(proposal.Impact, definition.Impact, StringComparison.Ordinal)
+            || proposal.Risk != definition.Risk || !proposal.RequiresExplicitApproval
+            || proposal.SupportsRollback != definition.SupportsRollback
+            || !string.Equals(proposal.Target, definition.Target, StringComparison.Ordinal)
+            || !(proposal.Preconditions ?? Array.Empty<string>()).SequenceEqual(
+                definition.Preconditions.Select(condition => condition.DisplayText), StringComparer.Ordinal)
+            || !(proposal.Postconditions ?? Array.Empty<string>()).SequenceEqual(
+                definition.Postconditions.Select(condition => condition.DisplayText), StringComparer.Ordinal)
+            || !(proposal.RollbackPreconditions ?? Array.Empty<string>()).SequenceEqual(
+                (definition.RollbackPreconditions ?? Array.Empty<RepairPlanCondition>()).Select(condition => condition.DisplayText), StringComparer.Ordinal)
+            || !(proposal.RollbackPostconditions ?? Array.Empty<string>()).SequenceEqual(
+                (definition.RollbackPostconditions ?? Array.Empty<RepairPlanCondition>()).Select(condition => condition.DisplayText), StringComparer.Ordinal)
+            || !(proposal.StructuredPreconditions ?? Array.Empty<RepairPlanCondition>()).SequenceEqual(definition.Preconditions)
+            || !(proposal.StructuredPostconditions ?? Array.Empty<RepairPlanCondition>()).SequenceEqual(definition.Postconditions)
+            || !(proposal.StructuredRollbackPreconditions ?? Array.Empty<RepairPlanCondition>()).SequenceEqual(
+                definition.RollbackPreconditions ?? Array.Empty<RepairPlanCondition>())
+            || !(proposal.StructuredRollbackPostconditions ?? Array.Empty<RepairPlanCondition>()).SequenceEqual(
+                definition.RollbackPostconditions ?? Array.Empty<RepairPlanCondition>()))
+            return false;
+
+        var expectedPreconditions = new[]
+        {
+            RepairConditionKind.DiagnosticRunIsCurrent,
+            RepairConditionKind.FindingIsPresent,
+            RepairConditionKind.RuleVersionIsCurrent,
+            RepairConditionKind.FindingMatchesRule,
+            RepairConditionKind.RuleIsAllowlisted
+        };
+        return AreConditionKindsEqual(proposal.StructuredPreconditions, expectedPreconditions)
+            && AreConditionKindsEqual(proposal.StructuredPostconditions,
+                [RepairConditionKind.SimulationCompletedWithoutSystemChanges]);
+    }
+
+    private static bool IsSha256Fingerprint(string? fingerprint) =>
+        fingerprint is { Length: 64 } && fingerprint.All(Uri.IsHexDigit);
+
+    private static bool IsValidEvidenceFingerprint(string? redactedEvidence, string? fingerprint)
+    {
+        if (string.IsNullOrWhiteSpace(redactedEvidence) || !IsSha256Fingerprint(fingerprint)) return false;
+        var computed = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(redactedEvidence))).ToLowerInvariant();
+        return string.Equals(computed, fingerprint, StringComparison.Ordinal);
+    }
+
+    private static bool AreConditionKindsEqual(
+        IReadOnlyList<RepairPlanCondition>? conditions,
+        IReadOnlyCollection<RepairConditionKind> expected) =>
+        conditions is { Count: > 0 }
+        && conditions.All(condition => condition is not null && Enum.IsDefined(condition.Kind))
+        && conditions.Select(condition => condition.Kind).Distinct().Count() == conditions.Count
+        && conditions.Count == expected.Count
+        && expected.All(kind => conditions.Any(condition => condition.Kind == kind));
+
+    private static bool AreConditionsVerified(
+        IReadOnlyList<RepairPlanCondition>? expected,
+        IReadOnlyList<RepairConditionResult>? results) =>
+        expected is { Count: > 0 }
+        && results is not null
+        && results.Count == expected.Count
+        && expected.All(condition => results.Count(result => result.Kind == condition.Kind
+            && result.Status == RepairConditionStatus.Verified) == 1);
+
+    private static IReadOnlyList<RepairConditionResult> NotEvaluated(IReadOnlyList<RepairPlanCondition> conditions) =>
+        conditions.Select(condition => new RepairConditionResult(condition.Kind, RepairConditionStatus.NotEvaluated)).ToArray();
 
     private static RepairHistoryRecord Finish(
         RepairHistoryRecord entry,
@@ -409,9 +641,10 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
             Status = status,
             ExecutionStarted = executionStarted,
             CompletedAtUtc = DateTimeOffset.UtcNow,
-            Details = Limit(details),
+            Details = Limit(DiagnosticPrivacyRedactor.RedactText(details)),
             PostconditionStatus = postconditions?.Status ?? RepairPostconditionStatus.NotEvaluated,
-            PostconditionDetails = Limit(postconditions?.Details ?? "")
+            PostconditionDetails = Limit(DiagnosticPrivacyRedactor.RedactText(postconditions?.Details ?? string.Empty)),
+            PostconditionResults = (postconditions?.Conditions ?? Array.Empty<RepairConditionResult>()).ToArray()
         };
 
     private static RepairHistoryRecord FinishFromPluginResult(
@@ -422,47 +655,36 @@ public sealed class RepairEngine(IEnumerable<IRepairPlugin> plugins, IRepairAudi
     {
         ArgumentNullException.ThrowIfNull(result);
         ArgumentNullException.ThrowIfNull(postconditions);
-        var status = postconditions.Status == RepairPostconditionStatus.Failed
-            ? action == RepairAction.Rollback ? RepairExecutionStatus.RollbackFailed : RepairExecutionStatus.Failed
-            : action == RepairAction.Rollback ? RepairExecutionStatus.RolledBack : RepairExecutionStatus.Succeeded;
+        var expectedPostconditions = action == RepairAction.Rollback
+            ? entry.StructuredRollbackPostconditions
+            : entry.StructuredPostconditions;
+        var allPostconditionsVerified = AreConditionsVerified(expectedPostconditions, postconditions.Conditions);
+        var status = postconditions.Status == RepairPostconditionStatus.Verified && allPostconditionsVerified
+            ? action == RepairAction.Rollback ? RepairExecutionStatus.RolledBack : RepairExecutionStatus.Succeeded
+            : RepairExecutionStatus.Inconclusive;
+        var auditedPostconditions = postconditions.Status == RepairPostconditionStatus.Verified && !allPostconditionsVerified
+            ? postconditions with
+            {
+                Status = RepairPostconditionStatus.NotEvaluated,
+                Details = "O verificador não forneceu resultados Verified para todas as pós-condições estruturadas."
+            }
+            : postconditions;
         var details = string.IsNullOrWhiteSpace(result.Details)
             ? "O plugin retornou sem detalhes adicionais."
-            : result.Details;
+            : DiagnosticPrivacyRedactor.RedactText(result.Details);
         if (postconditions.Status == RepairPostconditionStatus.Failed)
-            details = $"{details} Pós-condições declaradas não foram confirmadas: {postconditions.Details}";
+            details = $"{details} Pós-condições declaradas falharam; após Started, o efeito pode ser parcial ou inconclusivo. Detalhes: {postconditions.Details}";
         else if (postconditions.Status == RepairPostconditionStatus.NotEvaluated)
-            details = $"{details} Pós-condições não avaliadas automaticamente.";
-        return Finish(entry, status, details, true, postconditions);
+            details = $"{details} Pós-condições não avaliadas; sucesso não confirmado e estado inconclusivo.";
+        else if (!allPostconditionsVerified)
+            details = $"{details} Resultado de pós-condições incompleto; sucesso não confirmado.";
+        return Finish(entry, status, details, true, auditedPostconditions);
     }
 
     private static string SafeExceptionDetails(Exception exception, string stage) =>
         $"{exception.GetType().Name} {stage}; a mensagem e dados internos da exceção foram omitidos da auditoria.";
 
+    private sealed class PreconditionsRejectedException : Exception { }
+
     private static string Limit(string value) => value.Length <= 2000 ? value : value[..2000];
-}
-
-/// <summary>Plugin demonstrativo inerte; nunca chama processo, API do Windows ou altera o sistema.</summary>
-public sealed class InertDemonstrationRepairPlugin : IRepairPlugin
-{
-    public RepairProposal Proposal { get; } = new(
-        "demo.inert-preview",
-        "Demonstração inerte (nenhum reparo)",
-        "Exercita o contrato de consentimento e auditoria sem alterar o computador.",
-        RepairRiskLevel.Low,
-        "Nenhum impacto no sistema; apenas registra a demonstração.",
-        RequiresExplicitApproval: true,
-        SupportsRollback: false,
-        PlanVersion: 1,
-        Target: "Demonstração local; nenhum alvo do sistema",
-        Preconditions: ["Somente o fluxo inerte de demonstração está registrado."],
-        Postconditions: ["Nenhum estado do sistema deve ser alterado."]);
-
-    public Task<string> ExecuteAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult("Demonstração concluída: nenhum comando foi executado e nenhuma alteração foi aplicada.");
-    }
-
-    public Task<string> RollbackAsync(CancellationToken cancellationToken = default) =>
-        Task.FromException<string>(new NotSupportedException("A demonstração inerte não tem estado para reverter."));
 }

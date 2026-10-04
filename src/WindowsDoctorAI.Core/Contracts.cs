@@ -69,6 +69,8 @@ public interface IKnowledgeRepository
 public interface IRepairAuditLog
 {
     Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
+    /// <summary>Grava a primeira tentativa vinculada ao consentimento de forma atômica; false significa replay.</summary>
+    Task<bool> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default);
 
     async Task<RepairHistoryRecord?> GetByExecutionIdAsync(Guid repairExecutionId, CancellationToken cancellationToken = default)
@@ -76,4 +78,20 @@ public interface IRepairAuditLog
         var recent = await GetRecentAsync(500, cancellationToken).ConfigureAwait(false);
         return recent.FirstOrDefault(record => record.RepairExecutionId == repairExecutionId);
     }
+}
+
+/// <summary>Allowlist compilada de pares exatos de regra/versão e planos tipados.</summary>
+public interface IRepairProposalAllowlist
+{
+    bool TryGetDefinition(string ruleId, int ruleVersion, out RepairProposalDefinition? definition);
+}
+
+/// <summary>Avalia pré-condições estruturadas contra a evidência atual; resultados ausentes bloqueiam.</summary>
+public interface IRepairPreconditionEvaluator
+{
+    Task<IReadOnlyList<RepairConditionResult>> EvaluateAsync(
+        RepairProposal proposal,
+        RepairAction action,
+        Guid? relatedRepairExecutionId,
+        CancellationToken cancellationToken = default);
 }

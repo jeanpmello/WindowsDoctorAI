@@ -540,7 +540,7 @@ public sealed class DiagnosticPrivacyRetentionTests
         Assert.Equal(0, settings.DiagnosticRetentionDays);
         await using var verify = connection.CreateCommand();
         verify.CommandText = "PRAGMA user_version;";
-        Assert.Equal(4, Convert.ToInt32(await verify.ExecuteScalarAsync()));
+        Assert.Equal(WindowsDoctorDatabaseMigrator.CurrentVersion, Convert.ToInt32(await verify.ExecuteScalarAsync()));
     }
 
     [Fact]
@@ -739,6 +739,11 @@ public sealed class DiagnosticPrivacyRetentionTests
     private sealed class EmptyRepairAuditLog : IRepairAuditLog
     {
         public Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public async Task<bool> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+        {
+            await SaveAsync(record, cancellationToken);
+            return true;
+        }
         public Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<RepairHistoryRecord>>([]);
     }

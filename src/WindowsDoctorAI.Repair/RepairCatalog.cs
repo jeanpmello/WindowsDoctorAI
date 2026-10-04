@@ -8,7 +8,7 @@ public interface IRepairCatalog
     IReadOnlyList<RepairProposal> GetAvailableProposals();
 }
 
-/// <summary>A composição atual não registra reparos de sistema, apenas o framework e a demonstração inerte.</summary>
+/// <summary>A composição de produção não registra propostas nem plugins executores.</summary>
 public sealed class EmptyRepairCatalog : IRepairCatalog
 {
     public IReadOnlyList<RepairProposal> GetAvailableProposals() => Array.Empty<RepairProposal>();

@@ -122,7 +122,10 @@ public sealed record RecommendationEvidence(
     string Title,
     string Evidence,
     DateTimeOffset TimestampUtc,
-    string MatchedIndicator);
+    string MatchedIndicator)
+{
+    public string? SourceProvider { get; init; }
+}
 
 /// <summary>Recomendação explicável ligada à regra importada e a resultados efetivamente observados.</summary>
 public sealed record DiagnosticRecommendation(
@@ -183,7 +186,8 @@ public enum RepairExecutionStatus
     Prepared,
     Started,
     Cancelled,
-    RollbackFailed
+    RollbackFailed,
+    Inconclusive
 }
 
 public enum RepairAction
@@ -191,6 +195,49 @@ public enum RepairAction
     Execute,
     Rollback
 }
+
+/// <summary>Tipos fechados de plano. No aplicativo, apenas definições compiladas e explicitamente allowlistadas podem gerar propostas.</summary>
+public enum RepairProposalKind
+{
+    Unknown,
+    NoOpSimulation
+}
+
+/// <summary>Condições estruturadas; nenhum valor é comando, nome de processo ou caminho executável.</summary>
+public enum RepairConditionKind
+{
+    DiagnosticRunIsCurrent,
+    FindingIsPresent,
+    RuleVersionIsCurrent,
+    FindingMatchesRule,
+    RuleIsAllowlisted,
+    OriginalExecutionSucceeded,
+    SimulationCompletedWithoutSystemChanges
+}
+
+public enum RepairConditionStatus
+{
+    NotEvaluated,
+    Verified,
+    Failed
+}
+
+public sealed record RepairPlanCondition(RepairConditionKind Kind)
+{
+    public string DisplayText => Kind switch
+    {
+        RepairConditionKind.DiagnosticRunIsCurrent => "A execução diagnóstica vinculada ainda é a atual.",
+        RepairConditionKind.FindingIsPresent => "O achado identificado ainda existe na execução vinculada.",
+        RepairConditionKind.RuleVersionIsCurrent => "A mesma versão da regra continua vigente.",
+        RepairConditionKind.FindingMatchesRule => "A evidência redigida continua correspondendo à regra vinculada.",
+        RepairConditionKind.RuleIsAllowlisted => "O tipo de plano e a regra estão na allowlist compilada.",
+        RepairConditionKind.OriginalExecutionSucceeded => "A execução original vinculada foi verificada como concluída.",
+        RepairConditionKind.SimulationCompletedWithoutSystemChanges => "A simulação terminou sem alterar o sistema.",
+        _ => "Condição desconhecida; bloqueada."
+    };
+}
+
+public sealed record RepairConditionResult(RepairConditionKind Kind, RepairConditionStatus Status);
 
 public enum RepairPostconditionStatus
 {
@@ -202,6 +249,8 @@ public enum RepairPostconditionStatus
 /// <summary>Resultado declarado pelo plugin; NotEvaluated é o padrão e não afirma estado do Windows.</summary>
 public sealed record RepairPostconditionReport(RepairPostconditionStatus Status, string Details)
 {
+    public IReadOnlyList<RepairConditionResult> Conditions { get; init; } = Array.Empty<RepairConditionResult>();
+
     public static RepairPostconditionReport NotEvaluated { get; } =
         new(RepairPostconditionStatus.NotEvaluated, "Nenhuma verificação de pós-condições foi realizada.");
 }
@@ -220,7 +269,40 @@ public sealed record RepairProposal(
     IReadOnlyList<string>? Preconditions = null,
     IReadOnlyList<string>? Postconditions = null,
     IReadOnlyList<string>? RollbackPreconditions = null,
-    IReadOnlyList<string>? RollbackPostconditions = null);
+    IReadOnlyList<string>? RollbackPostconditions = null)
+{
+    public RepairProposalKind Kind { get; init; } = RepairProposalKind.Unknown;
+    public int OperationVersion { get; init; } = 1;
+    public Guid DiagnosticRunId { get; init; }
+    public string FindingIdentity { get; init; } = string.Empty;
+    public string RuleId { get; init; } = string.Empty;
+    public int RuleVersion { get; init; }
+    public string EvidenceFingerprint { get; init; } = string.Empty;
+    public string RedactedEvidence { get; init; } = string.Empty;
+    public IReadOnlyList<RepairPlanCondition> StructuredPreconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+    public IReadOnlyList<RepairPlanCondition> StructuredPostconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+    public IReadOnlyList<RepairPlanCondition> StructuredRollbackPreconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+    public IReadOnlyList<RepairPlanCondition> StructuredRollbackPostconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+}
+
+/// <summary>Descrição estática compilada que a allowlist associa a uma versão exata de regra.</summary>
+public sealed record RepairProposalDefinition(
+    string RuleId,
+    int RuleVersion,
+    RepairProposalKind Kind,
+    int PlanVersion,
+    int OperationVersion,
+    string ProposalId,
+    string Title,
+    string Description,
+    RepairRiskLevel Risk,
+    string Impact,
+    string Target,
+    IReadOnlyList<RepairPlanCondition> Preconditions,
+    IReadOnlyList<RepairPlanCondition> Postconditions,
+    bool SupportsRollback = false,
+    IReadOnlyList<RepairPlanCondition>? RollbackPreconditions = null,
+    IReadOnlyList<RepairPlanCondition>? RollbackPostconditions = null);
 
 /// <summary>Consentimento imutável para exatamente uma ação, versão do plano, risco e alvo.</summary>
 public sealed class RepairConsent
@@ -234,7 +316,13 @@ public sealed class RepairConsent
         RepairAction action,
         Guid? relatedRepairExecutionId,
         DateTimeOffset confirmedAtUtc,
-        string planFingerprint)
+        string planFingerprint,
+        RepairProposalKind kind,
+        int operationVersion,
+        Guid diagnosticRunId,
+        string findingIdentity,
+        string ruleId,
+        int ruleVersion)
     {
         ConsentId = consentId;
         RepairId = repairId;
@@ -245,6 +333,12 @@ public sealed class RepairConsent
         RelatedRepairExecutionId = relatedRepairExecutionId;
         ConfirmedAtUtc = confirmedAtUtc;
         PlanFingerprint = planFingerprint;
+        Kind = kind;
+        OperationVersion = operationVersion;
+        DiagnosticRunId = diagnosticRunId;
+        FindingIdentity = findingIdentity;
+        RuleId = ruleId;
+        RuleVersion = ruleVersion;
     }
 
     public Guid ConsentId { get; }
@@ -256,6 +350,19 @@ public sealed class RepairConsent
     public Guid? RelatedRepairExecutionId { get; }
     public DateTimeOffset ConfirmedAtUtc { get; }
     public string PlanFingerprint { get; }
+    public RepairProposalKind Kind { get; }
+    public int OperationVersion { get; }
+    public Guid DiagnosticRunId { get; }
+    public string FindingIdentity { get; }
+    public string RuleId { get; }
+    public int RuleVersion { get; }
+
+    /// <summary>Calcula apenas o fingerprint do plano; não emite nem consome consentimento.</summary>
+    public static string FingerprintFor(RepairProposal proposal, RepairAction action = RepairAction.Execute)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+        return CalculatePlanFingerprint(proposal, action);
+    }
 
     /// <summary>Crie somente depois de apresentar e confirmar a proposta exata ao usuário.</summary>
     public static RepairConsent Confirm(RepairProposal proposal, DateTimeOffset? confirmedAtUtc = null) =>
@@ -277,14 +384,23 @@ public sealed class RepairConsent
         && relatedRepairExecutionId == RelatedRepairExecutionId
         && string.Equals(RepairId, proposal.Id, StringComparison.Ordinal)
         && PlanVersion == proposal.PlanVersion
+        && Kind == proposal.Kind
+        && OperationVersion == proposal.OperationVersion
         && Risk == proposal.Risk
         && string.Equals(Target, proposal.Target, StringComparison.Ordinal)
-        && string.Equals(PlanFingerprint, CalculatePlanFingerprint(proposal), StringComparison.Ordinal);
+        && DiagnosticRunId == proposal.DiagnosticRunId
+        && string.Equals(FindingIdentity, proposal.FindingIdentity, StringComparison.Ordinal)
+        && string.Equals(RuleId, proposal.RuleId, StringComparison.Ordinal)
+        && RuleVersion == proposal.RuleVersion
+        && string.Equals(PlanFingerprint, CalculatePlanFingerprint(proposal, action), StringComparison.Ordinal);
 
-    internal static string CalculatePlanFingerprint(RepairProposal proposal)
+    internal static string CalculatePlanFingerprint(RepairProposal proposal, RepairAction action)
     {
         var payload = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
         {
+            Action = action,
+            proposal.Kind,
+            proposal.OperationVersion,
             proposal.Id,
             proposal.PlanVersion,
             proposal.Title,
@@ -297,7 +413,17 @@ public sealed class RepairConsent
             Preconditions = proposal.Preconditions ?? Array.Empty<string>(),
             Postconditions = proposal.Postconditions ?? Array.Empty<string>(),
             RollbackPreconditions = proposal.RollbackPreconditions ?? Array.Empty<string>(),
-            RollbackPostconditions = proposal.RollbackPostconditions ?? Array.Empty<string>()
+            RollbackPostconditions = proposal.RollbackPostconditions ?? Array.Empty<string>(),
+            StructuredPreconditions = proposal.StructuredPreconditions ?? Array.Empty<RepairPlanCondition>(),
+            StructuredPostconditions = proposal.StructuredPostconditions ?? Array.Empty<RepairPlanCondition>(),
+            StructuredRollbackPreconditions = proposal.StructuredRollbackPreconditions ?? Array.Empty<RepairPlanCondition>(),
+            StructuredRollbackPostconditions = proposal.StructuredRollbackPostconditions ?? Array.Empty<RepairPlanCondition>(),
+            proposal.DiagnosticRunId,
+            proposal.FindingIdentity,
+            proposal.RuleId,
+            proposal.RuleVersion,
+            proposal.EvidenceFingerprint,
+            proposal.RedactedEvidence
         });
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload));
     }
@@ -312,13 +438,21 @@ public sealed class RepairConsent
         ArgumentException.ThrowIfNullOrWhiteSpace(proposal.Id);
         if (proposal.PlanVersion < 1)
             throw new ArgumentOutOfRangeException(nameof(proposal), "A versão do plano deve ser positiva.");
+        if (proposal.OperationVersion < 1)
+            throw new ArgumentOutOfRangeException(nameof(proposal), "A versão da ação deve ser positiva.");
+        if (!Enum.IsDefined(proposal.Kind) || proposal.Kind == RepairProposalKind.Unknown)
+            throw new InvalidOperationException("O tipo do plano não está allowlistado.");
         if (proposal.Risk == RepairRiskLevel.Unknown)
             throw new InvalidOperationException("Não é possível consentir com um plano cujo risco não foi declarado.");
         ArgumentException.ThrowIfNullOrWhiteSpace(proposal.Target);
+        if (proposal.DiagnosticRunId == Guid.Empty || string.IsNullOrWhiteSpace(proposal.FindingIdentity)
+            || string.IsNullOrWhiteSpace(proposal.RuleId) || proposal.RuleVersion < 1)
+            throw new InvalidOperationException("A proposta precisa estar vinculada a uma execução, achado e versão de regra.");
 
         return new RepairConsent(Guid.NewGuid(), proposal.Id, proposal.PlanVersion, proposal.Risk, proposal.Target,
             action, relatedRepairExecutionId, confirmedAtUtc ?? DateTimeOffset.UtcNow,
-            CalculatePlanFingerprint(proposal));
+            CalculatePlanFingerprint(proposal, action), proposal.Kind, proposal.OperationVersion,
+            proposal.DiagnosticRunId, proposal.FindingIdentity, proposal.RuleId, proposal.RuleVersion);
     }
 }
 
@@ -352,4 +486,18 @@ public sealed record RepairHistoryRecord(
     public bool ExecutionStarted { get; init; }
     public RepairPostconditionStatus PostconditionStatus { get; init; } = RepairPostconditionStatus.NotEvaluated;
     public string PostconditionDetails { get; init; } = "";
+    public RepairProposalKind ProposalKind { get; init; } = RepairProposalKind.Unknown;
+    public int OperationVersion { get; init; } = 1;
+    public Guid? DiagnosticRunId { get; init; }
+    public string FindingIdentity { get; init; } = string.Empty;
+    public string RuleId { get; init; } = string.Empty;
+    public int? RuleVersion { get; init; }
+    public string EvidenceFingerprint { get; init; } = string.Empty;
+    public string RedactedEvidence { get; init; } = string.Empty;
+    public IReadOnlyList<RepairPlanCondition> StructuredPreconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+    public IReadOnlyList<RepairPlanCondition> StructuredPostconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+    public IReadOnlyList<RepairPlanCondition> StructuredRollbackPreconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+    public IReadOnlyList<RepairPlanCondition> StructuredRollbackPostconditions { get; init; } = Array.Empty<RepairPlanCondition>();
+    public IReadOnlyList<RepairConditionResult> PreconditionResults { get; init; } = Array.Empty<RepairConditionResult>();
+    public IReadOnlyList<RepairConditionResult> PostconditionResults { get; init; } = Array.Empty<RepairConditionResult>();
 }

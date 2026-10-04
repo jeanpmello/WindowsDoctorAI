@@ -59,7 +59,7 @@ public sealed class RecommendationEngine
                 match.Result.Title,
                 match.Result.Evidence,
                 match.Result.Timestamp,
-                match.Indicator)).ToArray();
+                match.Indicator) { SourceProvider = match.Result.SourceMetadata?.Provider }).ToArray();
             var exactMatches = matches.Where(match => match.ExactCode).ToArray();
             var distinctScanners = exactMatches.Select(match => match.Result.ScannerName)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();

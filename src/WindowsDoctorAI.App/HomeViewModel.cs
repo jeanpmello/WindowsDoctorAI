@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using WindowsDoctorAI.Application;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Domain;
+using WindowsDoctorAI.Repair;
 
 namespace WindowsDoctorAI.App;
 
@@ -17,7 +18,9 @@ internal partial class HomeViewModel(
     DiagnosticAssessmentService assessmentService,
     CbsLogImportService cbsLogImportService,
     IBackupSetCatalogSource backupSetCatalogSource,
-    ILogger<HomeViewModel> logger) : ObservableObject
+    ILogger<HomeViewModel> logger,
+    RepairProposalBuilder? repairProposalBuilder = null,
+    RepairEngine? repairEngine = null) : ObservableObject
 {
     private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
     private static readonly string[] DashboardCategories = ["Sistema", "Drivers", "Hardware", "Rede", "Segurança"];
@@ -69,6 +72,8 @@ internal partial class HomeViewModel(
     [ObservableProperty] private bool _isLoadingBackupSetCatalog;
     [ObservableProperty] private string _backupSetCatalogStatusText = "Catálogo não consultado. Selecione Atualizar para listar metadados temporários.";
     [ObservableProperty] private IReadOnlyList<BackupSetCatalogDisplayItem> _backupSetCatalogEntries = Array.Empty<BackupSetCatalogDisplayItem>();
+    [ObservableProperty] private IReadOnlyList<RepairProposalDisplayItem> _repairProposals = Array.Empty<RepairProposalDisplayItem>();
+    [ObservableProperty] private string _repairProposalStatus = "Nenhum plano tipado disponível nesta sessão.";
 
     private string? _pendingPackageJson;
     private DiagnosticRun? _currentRun;
@@ -86,6 +91,7 @@ internal partial class HomeViewModel(
     partial void OnIsScanningChanged(bool value)
     {
         StartDiagnosticCommand.NotifyCanExecuteChanged();
+        ConsentToRepairPlanCommand.NotifyCanExecuteChanged();
         UpdateImportCommandState();
         UpdateCbsLogCommandState();
     }
@@ -265,6 +271,7 @@ internal partial class HomeViewModel(
             var imported = await knowledgeImporter.ImportAsync(json);
             _pendingPackageJson = null;
             await RefreshKnowledgeBaseStatusAsync();
+            await RefreshRepairProposalsAsync(_currentRun);
             PackageReviewStatus = $"Importação concluída: {imported.ImportedRules} regra(s), versão {imported.Version}. Pacote e fonte continuam não verificados quanto à autoria.";
             StatusMessage = "Pacote importado localmente; a importação não autentica a autoria nem comprova as afirmações das regras.";
         }
@@ -376,6 +383,8 @@ internal partial class HomeViewModel(
     [RelayCommand(CanExecute = nameof(CanStartDiagnostic))]
     private async Task StartDiagnosticAsync()
     {
+        RepairProposals = Array.Empty<RepairProposalDisplayItem>();
+        RepairProposalStatus = "Planos anteriores invalidados; aguardando um novo diagnóstico.";
         ResetCbsLogAnalysis("A observação CBS é independente do diagnóstico e não será associada a evento algum.");
         UpdateCbsLogCommandState();
         IsScanning = true;
@@ -384,6 +393,7 @@ internal partial class HomeViewModel(
         {
             var outcome = await runDiagnostic.ExecuteAsync();
             _currentRun = outcome.Run;
+            await RefreshRepairProposalsAsync(outcome.Run);
             UpdateCbsLogCommandState();
             CanExportHtmlReport = true;
             DisplayInventory(outcome.Run.Inventory);
@@ -411,6 +421,8 @@ internal partial class HomeViewModel(
         StatusMessage = "Carregando histórico local...";
         LastDiagnosticText = "Carregando histórico local...";
         FindingsSummary = "Carregando resultados do histórico local...";
+        RepairProposals = Array.Empty<RepairProposalDisplayItem>();
+        RepairProposalStatus = "Carregando evidência atual; planos antigos estão indisponíveis.";
         try
         {
             ResetCbsLogAnalysis("Selecione manualmente um CBS.log para uma observação offline e isolada.");
@@ -419,12 +431,15 @@ internal partial class HomeViewModel(
             var latest = await history.GetLatestAsync(cancellationToken);
             if (latest is null)
             {
+                _currentRun = null;
+                RepairProposalStatus = "Nenhum plano disponível: não há uma execução diagnóstica atual salva para revalidar.";
                 LastDiagnosticText = "Nenhum diagnóstico anterior encontrado no histórico local.";
                 FindingsSummary = "Nenhum resultado anterior está disponível no histórico local.";
                 StatusMessage = "Nenhum diagnóstico anterior encontrado no histórico local. Execute um diagnóstico para ver resultados.";
                 return;
             }
             _currentRun = latest;
+            await RefreshRepairProposalsAsync(latest, cancellationToken);
             CanExportHtmlReport = true;
             DisplayInventory(latest.Inventory);
             DisplayReport(latest.Report, latest.Duration, latest.Inventory);
@@ -469,6 +484,97 @@ internal partial class HomeViewModel(
         WarningsText = report.Warnings.ToString(CultureInfo.InvariantCulture);
         CategoriesSummary = FormatCategories(report);
         FindingsSummary = DiagnosticDisplayFormatter.FormatFindings(report, inventory);
+    }
+
+    private async Task RefreshRepairProposalsAsync(DiagnosticRun? run, CancellationToken cancellationToken = default)
+    {
+        RepairProposals = Array.Empty<RepairProposalDisplayItem>();
+        if (run?.Report is null || repairProposalBuilder is null || repairEngine is null)
+        {
+            RepairProposalStatus = "Nenhum plano tipado disponível. Procedimentos manuais não são convertidos em propostas.";
+            return;
+        }
+
+        try
+        {
+            var latest = await history.GetLatestAsync(cancellationToken).ConfigureAwait(true);
+            if (latest?.Id != run.Id)
+            {
+                RepairProposalStatus = "Planos indisponíveis: a execução atual não está salva para revalidar a evidência. Ative o histórico se desejar esse recurso.";
+                return;
+            }
+
+            var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(true);
+            var registeredIds = repairEngine.GetProposals().Select(proposal => proposal.Id).ToHashSet(StringComparer.Ordinal);
+            var proposals = repairProposalBuilder.Build(run, rules)
+                .Where(proposal => registeredIds.Contains(proposal.Id))
+                .Select(RepairProposalDisplayItem.From)
+                .ToArray();
+            RepairProposals = proposals;
+            RepairProposalStatus = proposals.Length == 0
+                ? "Nenhum plano tipado está allowlistado para estes achados. Procedimentos ManualOnly continuam manuais; nenhum comando será sugerido ou executado."
+                : "Planos simulados allowlistados. Revise todos os detalhes; somente o botão explícito emite consentimento one-shot. Nenhum reparo real está habilitado nesta versão.";
+        }
+        catch (Exception)
+        {
+            RepairProposals = Array.Empty<RepairProposalDisplayItem>();
+            RepairProposalStatus = "Não foi possível revalidar propostas; nenhuma ação está disponível.";
+            logger.LogWarning("A avaliação local de propostas foi bloqueada; detalhes omitidos por privacidade.");
+        }
+    }
+
+    private bool CanConsentToRepairPlan(RepairProposalDisplayItem? item) =>
+        !IsScanning && item is not null && repairEngine is not null && repairProposalBuilder is not null
+        && _currentRun?.Id == item.Proposal.DiagnosticRunId
+        && RepairProposals.Any(candidate => string.Equals(candidate.Proposal.Id, item.Proposal.Id, StringComparison.Ordinal));
+
+    [RelayCommand(CanExecute = nameof(CanConsentToRepairPlan))]
+    private async Task ConsentToRepairPlanAsync(RepairProposalDisplayItem? item)
+    {
+        if (!CanConsentToRepairPlan(item) || item is null || _currentRun is null
+            || repairEngine is null || repairProposalBuilder is null)
+            return;
+
+        try
+        {
+            var rules = await knowledgeRepository.GetLatestRulesAsync().ConfigureAwait(true);
+            var latest = await history.GetLatestAsync().ConfigureAwait(true);
+            var current = latest?.Id == _currentRun.Id
+                ? repairProposalBuilder.Build(_currentRun, rules).SingleOrDefault(proposal =>
+                    string.Equals(proposal.Id, item.Proposal.Id, StringComparison.Ordinal)
+                    && string.Equals(proposal.FindingIdentity, item.Proposal.FindingIdentity, StringComparison.Ordinal)
+                    && proposal.RuleVersion == item.Proposal.RuleVersion
+                    && string.Equals(proposal.EvidenceFingerprint, item.Proposal.EvidenceFingerprint, StringComparison.Ordinal))
+                : null;
+            if (current is null)
+            {
+                RepairProposalStatus = "Plano ou evidência obsoletos; consentimento não emitido. Execute novamente o diagnóstico.";
+                await RefreshRepairProposalsAsync(_currentRun).ConfigureAwait(true);
+                return;
+            }
+
+            // O consentimento só é criado após este clique e está vinculado ao fingerprint do plano revalidado.
+            var consent = RepairConsent.Confirm(current);
+            var result = await repairEngine.ExecuteAsync(current.Id, consent).ConfigureAwait(true);
+            RepairProposalStatus = result.Status switch
+            {
+                RepairExecutionStatus.Succeeded => "Simulação concluída e pós-condições verificadas; nenhum reparo de sistema foi executado.",
+                RepairExecutionStatus.Inconclusive => "Tentativa inconclusiva; pós-condições não foram verificadas. Nenhum rollback automático será tentado.",
+                RepairExecutionStatus.Declined => "Tentativa bloqueada ou consentimento já utilizado; nenhuma ação adicional foi iniciada.",
+                RepairExecutionStatus.Cancelled => "Tentativa cancelada; se já havia começado, o estado pode ser parcial ou inconclusivo. Nenhum rollback automático será tentado.",
+                _ => "Tentativa registrada sem execução de reparo de sistema. Consulte a auditoria local."
+            };
+            RepairProposals = Array.Empty<RepairProposalDisplayItem>();
+        }
+        catch (Exception)
+        {
+            RepairProposalStatus = "Não foi possível concluir o fluxo de consentimento; detalhes internos foram omitidos.";
+            logger.LogWarning("O fluxo de consentimento de proposta falhou; detalhes omitidos por privacidade.");
+        }
+        finally
+        {
+            ConsentToRepairPlanCommand.NotifyCanExecuteChanged();
+        }
     }
 
     private static string FormatCategories(DiagnosticReport report)
@@ -538,3 +644,32 @@ internal sealed record BackupSetCatalogDisplayItem(
     string BackupTypeText,
     string VolumeCountText,
     string VerificationText);
+
+internal sealed record RepairProposalDisplayItem(
+    RepairProposal Proposal,
+    string RiskText,
+    string SourceText,
+    string PreconditionsText,
+    string PostconditionsText,
+    string RollbackSupportText,
+    string RollbackPreconditionsText,
+    string RollbackPostconditionsText,
+    string FingerprintText)
+{
+    public static RepairProposalDisplayItem From(RepairProposal proposal) => new(
+        proposal,
+        proposal.Risk switch
+        {
+            RepairRiskLevel.Low => "Baixo (simulação)",
+            RepairRiskLevel.Moderate => "Moderado (simulação)",
+            RepairRiskLevel.High => "Alto (simulação)",
+            _ => "Desconhecido — bloqueado"
+        },
+        $"DiagnosticRunId: {proposal.DiagnosticRunId:D}\nFinding: {proposal.FindingIdentity}\nRegra: {proposal.RuleId} v{proposal.RuleVersion}",
+        string.Join(Environment.NewLine, proposal.StructuredPreconditions.Select(condition => "• " + condition.DisplayText)),
+        string.Join(Environment.NewLine, proposal.StructuredPostconditions.Select(condition => "• " + condition.DisplayText)),
+        proposal.SupportsRollback ? "Sim; ação separada e consentimento próprio." : "Não",
+        string.Join(Environment.NewLine, proposal.StructuredRollbackPreconditions.Select(condition => "• " + condition.DisplayText)),
+        string.Join(Environment.NewLine, proposal.StructuredRollbackPostconditions.Select(condition => "• " + condition.DisplayText)),
+        "SHA-256 do plano: " + RepairConsent.FingerprintFor(proposal));
+}

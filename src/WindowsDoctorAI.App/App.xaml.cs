@@ -60,6 +60,9 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                     services.AddSingleton<HtmlDiagnosticReportFormatter>();
                     services.AddTransient<DiagnosticAssessmentService>();
                     services.AddTransient<KnowledgeJsonImporter>();
+                    services.AddSingleton<IRepairProposalAllowlist, CodeRepairProposalAllowlist>();
+                    services.AddTransient<RepairProposalBuilder>();
+                    services.AddTransient<IRepairPreconditionEvaluator, DiagnosticRepairPreconditionEvaluator>();
                     services.AddTransient<RepairEngine>();
                     services.AddSingleton<IRepairCatalog, EmptyRepairCatalog>();
                     services.AddSingleton<INavigationService, NavigationService>();

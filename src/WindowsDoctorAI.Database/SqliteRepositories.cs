@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using WindowsDoctorAI.Core;
@@ -27,6 +28,20 @@ internal sealed class RepairHistoryAuditMetadata
     public bool ExecutionStarted { get; set; }
     public RepairPostconditionStatus PostconditionStatus { get; set; } = RepairPostconditionStatus.NotEvaluated;
     public string PostconditionDetails { get; set; } = string.Empty;
+    public RepairProposalKind ProposalKind { get; set; } = RepairProposalKind.Unknown;
+    public int OperationVersion { get; set; } = 1;
+    public Guid? DiagnosticRunId { get; set; }
+    public string FindingIdentity { get; set; } = string.Empty;
+    public string RuleId { get; set; } = string.Empty;
+    public int? RuleVersion { get; set; }
+    public string EvidenceFingerprint { get; set; } = string.Empty;
+    public string RedactedEvidence { get; set; } = string.Empty;
+    public RepairPlanCondition[] StructuredPreconditions { get; set; } = [];
+    public RepairPlanCondition[] StructuredPostconditions { get; set; } = [];
+    public RepairPlanCondition[] StructuredRollbackPreconditions { get; set; } = [];
+    public RepairPlanCondition[] StructuredRollbackPostconditions { get; set; } = [];
+    public RepairConditionResult[] PreconditionResults { get; set; } = [];
+    public RepairConditionResult[] PostconditionResults { get; set; } = [];
 }
 
 public sealed class SqliteDiagnosticRunRepository(WindowsDoctorDbContext dbContext) : IDiagnosticRunRepository
@@ -200,6 +215,7 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
     public async Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
+        record = Redact(record);
         var entity = await dbContext.RepairHistory
             .SingleOrDefaultAsync(item => item.Id == record.RepairExecutionId, cancellationToken)
             .ConfigureAwait(false);
@@ -233,9 +249,66 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
             PlanFingerprint = record.PlanFingerprint,
             ExecutionStarted = record.ExecutionStarted,
             PostconditionStatus = record.PostconditionStatus,
-            PostconditionDetails = record.PostconditionDetails
+            PostconditionDetails = record.PostconditionDetails,
+            ProposalKind = record.ProposalKind,
+            OperationVersion = record.OperationVersion,
+            DiagnosticRunId = record.DiagnosticRunId,
+            FindingIdentity = record.FindingIdentity,
+            RuleId = record.RuleId,
+            RuleVersion = record.RuleVersion,
+            EvidenceFingerprint = record.EvidenceFingerprint,
+            RedactedEvidence = record.RedactedEvidence,
+            StructuredPreconditions = record.StructuredPreconditions.ToArray(),
+            StructuredPostconditions = record.StructuredPostconditions.ToArray(),
+            StructuredRollbackPreconditions = record.StructuredRollbackPreconditions.ToArray(),
+            StructuredRollbackPostconditions = record.StructuredRollbackPostconditions.ToArray(),
+            PreconditionResults = record.PreconditionResults.ToArray(),
+            PostconditionResults = record.PostconditionResults.ToArray()
         }, InventoryJson.Options);
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<bool> TrySaveConsentAttemptAsync(
+        RepairHistoryRecord record,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.ConsentId is not { } consentId)
+        {
+            await SaveAsync(record, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        var claim = new RepairConsentUseEntity
+        {
+            ConsentId = consentId,
+            FirstRepairExecutionId = record.RepairExecutionId,
+            ConsumedAtUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+        dbContext.RepairConsentUses.Add(claim);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await SaveAsync(record, cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            dbContext.Entry(claim).State = EntityState.Detached;
+            return true;
+        }
+        catch (DbUpdateException exception) when (IsConsentReplay(exception))
+        {
+            try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch { /* Preserve replay result. */ }
+            dbContext.Entry(claim).State = EntityState.Detached;
+            return false;
+        }
+        catch
+        {
+            try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch { /* Preserve the original persistence exception. */ }
+            dbContext.Entry(claim).State = EntityState.Detached;
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default)
@@ -289,9 +362,43 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
             PlanFingerprint = metadata.PlanFingerprint,
             ExecutionStarted = metadata.ExecutionStarted,
             PostconditionStatus = metadata.PostconditionStatus,
-            PostconditionDetails = metadata.PostconditionDetails
+            PostconditionDetails = metadata.PostconditionDetails,
+            ProposalKind = metadata.ProposalKind,
+            OperationVersion = metadata.OperationVersion,
+            DiagnosticRunId = metadata.DiagnosticRunId,
+            FindingIdentity = metadata.FindingIdentity,
+            RuleId = metadata.RuleId,
+            RuleVersion = metadata.RuleVersion,
+            EvidenceFingerprint = metadata.EvidenceFingerprint,
+            RedactedEvidence = metadata.RedactedEvidence,
+            StructuredPreconditions = metadata.StructuredPreconditions,
+            StructuredPostconditions = metadata.StructuredPostconditions,
+            StructuredRollbackPreconditions = metadata.StructuredRollbackPreconditions,
+            StructuredRollbackPostconditions = metadata.StructuredRollbackPostconditions,
+            PreconditionResults = metadata.PreconditionResults,
+            PostconditionResults = metadata.PostconditionResults
         };
     }
+
+    private static bool IsConsentReplay(DbUpdateException exception) =>
+        exception.InnerException is SqliteException
+        {
+            SqliteErrorCode: 19,
+            SqliteExtendedErrorCode: 1555
+        };
+
+    private static RepairHistoryRecord Redact(RepairHistoryRecord record) => record with
+    {
+        Title = DiagnosticPrivacyRedactor.RedactText(record.Title),
+        Target = DiagnosticPrivacyRedactor.RedactText(record.Target),
+        Details = DiagnosticPrivacyRedactor.RedactText(record.Details),
+        Preconditions = record.Preconditions.Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
+        Postconditions = record.Postconditions.Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
+        RollbackPreconditions = record.RollbackPreconditions.Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
+        RollbackPostconditions = record.RollbackPostconditions.Select(value => DiagnosticPrivacyRedactor.RedactText(value)).ToArray(),
+        RedactedEvidence = DiagnosticPrivacyRedactor.RedactText(record.RedactedEvidence),
+        PostconditionDetails = DiagnosticPrivacyRedactor.RedactText(record.PostconditionDetails)
+    };
 }
 
 public static class DatabaseServiceCollectionExtensions
@@ -322,7 +429,7 @@ public static class DatabaseServiceCollectionExtensions
 /// <summary>Schema local evolui em passos idempotentes; PRAGMA user_version identifica o último passo concluído.</summary>
 public static class WindowsDoctorDatabaseMigrator
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     public static async Task MigrateAsync(WindowsDoctorDbContext context, CancellationToken cancellationToken = default)
     {
@@ -370,6 +477,10 @@ public static class WindowsDoctorDatabaseMigrator
                     "Details" TEXT NOT NULL,
                     "AuditMetadataJson" TEXT NOT NULL DEFAULT '{{}}');
                 CREATE INDEX IF NOT EXISTS "IX_RepairHistory_CompletedAtUnixMilliseconds" ON "RepairHistory" ("CompletedAtUnixMilliseconds");
+                CREATE TABLE IF NOT EXISTS "RepairConsentUses" (
+                    "ConsentId" TEXT NOT NULL CONSTRAINT "PK_RepairConsentUses" PRIMARY KEY,
+                    "FirstRepairExecutionId" TEXT NOT NULL,
+                    "ConsumedAtUnixMilliseconds" INTEGER NOT NULL);
                 """, cancellationToken).ConfigureAwait(false);
 
             if (!await HasRepairHistoryMetadataColumnAsync(context, cancellationToken).ConfigureAwait(false))

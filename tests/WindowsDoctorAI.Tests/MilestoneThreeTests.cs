@@ -1,5 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WindowsDoctorAI.Application;
@@ -247,7 +249,7 @@ public sealed class MilestoneThreeTests
     {
         var plugin = new TestRepairPlugin();
         var audit = new InMemoryRepairAuditLog();
-        var engine = new RepairEngine([plugin], audit);
+        var engine = CreateEngine(plugin, audit);
 
         var declined = await engine.ExecuteAsync(plugin.Proposal.Id, consent: null);
         Assert.Equal(RepairExecutionStatus.Declined, declined.Status);
@@ -383,21 +385,88 @@ public sealed class MilestoneThreeTests
     private sealed class InMemoryRepairAuditLog : IRepairAuditLog
     {
         public List<RepairHistoryRecord> Records { get; } = [];
+        private readonly HashSet<Guid> _consumedConsents = [];
         public Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
         {
             Records.RemoveAll(existing => existing.RepairExecutionId == record.RepairExecutionId);
             Records.Add(record);
             return Task.CompletedTask;
         }
+        public async Task<bool> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+        {
+            if (record.ConsentId is { } consentId && !_consumedConsents.Add(consentId)) return false;
+            await SaveAsync(record, cancellationToken);
+            return true;
+        }
         public Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<RepairHistoryRecord>>(Records.Take(count).ToArray());
     }
 
+    private static RepairEngine CreateEngine(IRepairPlugin plugin, InMemoryRepairAuditLog audit) =>
+        new([plugin], audit, new FixturePreconditionEvaluator(), new FixtureAllowlist(plugin.Proposal));
+
+    private sealed class FixtureAllowlist(RepairProposal proposal) : IRepairProposalAllowlist
+    {
+        private readonly RepairProposalDefinition _definition = new(
+            proposal.RuleId, proposal.RuleVersion, proposal.Kind, proposal.PlanVersion, proposal.OperationVersion,
+            proposal.Id, proposal.Title, proposal.Description, proposal.Risk, proposal.Impact, proposal.Target,
+            proposal.StructuredPreconditions, proposal.StructuredPostconditions, proposal.SupportsRollback,
+            proposal.StructuredRollbackPreconditions, proposal.StructuredRollbackPostconditions);
+
+        public bool TryGetDefinition(string ruleId, int ruleVersion, out RepairProposalDefinition? definition)
+        {
+            definition = string.Equals(ruleId, _definition.RuleId, StringComparison.Ordinal)
+                && ruleVersion == _definition.RuleVersion ? _definition : null;
+            return definition is not null;
+        }
+    }
+
+    private sealed class FixturePreconditionEvaluator : IRepairPreconditionEvaluator
+    {
+        public Task<IReadOnlyList<RepairConditionResult>> EvaluateAsync(
+            RepairProposal proposal, RepairAction action, Guid? relatedRepairExecutionId,
+            CancellationToken cancellationToken = default)
+        {
+            var conditions = action == RepairAction.Rollback
+                ? proposal.StructuredRollbackPreconditions : proposal.StructuredPreconditions;
+            return Task.FromResult<IReadOnlyList<RepairConditionResult>>(conditions.Select(condition =>
+                new RepairConditionResult(condition.Kind, RepairConditionStatus.Verified)).ToArray());
+        }
+    }
+
     private sealed class TestRepairPlugin : IRepairPlugin
     {
-        public RepairProposal Proposal { get; } = new("test.inert", "Fake inerte", "Somente teste sem mudança de sistema.",
+        public RepairProposal Proposal { get; } = new RepairProposal("test.inert", "Fake inerte", "Somente teste sem mudança de sistema.",
             RepairRiskLevel.Low, "Nenhum impacto real.", SupportsRollback: false, PlanVersion: 1,
-            Target: "Fake local; sem alvo do sistema");
+            Target: "Fake local; sem alvo do sistema",
+            Preconditions:
+            [
+                "A execução diagnóstica vinculada ainda é a atual.",
+                "O achado identificado ainda existe na execução vinculada.",
+                "A mesma versão da regra continua vigente.",
+                "A evidência redigida continua correspondendo à regra vinculada.",
+                "O tipo de plano e a regra estão na allowlist compilada."
+            ],
+            Postconditions: ["A simulação terminou sem alterar o sistema."])
+        {
+            Kind = RepairProposalKind.NoOpSimulation,
+            OperationVersion = 1,
+            DiagnosticRunId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            FindingIdentity = new string('b', 64),
+            RuleId = "test.inert.rule",
+            RuleVersion = 1,
+            RedactedEvidence = "Fixture sem dados de host.",
+            EvidenceFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("Fixture sem dados de host."))).ToLowerInvariant(),
+            StructuredPreconditions =
+            [
+                new(RepairConditionKind.DiagnosticRunIsCurrent),
+                new(RepairConditionKind.FindingIsPresent),
+                new(RepairConditionKind.RuleVersionIsCurrent),
+                new(RepairConditionKind.FindingMatchesRule),
+                new(RepairConditionKind.RuleIsAllowlisted)
+            ],
+            StructuredPostconditions = [new(RepairConditionKind.SimulationCompletedWithoutSystemChanges)]
+        };
         public int ExecuteCount { get; private set; }
         public int RollbackCount { get; private set; }
         public Task<string> ExecuteAsync(CancellationToken cancellationToken = default)
@@ -410,5 +479,13 @@ public sealed class MilestoneThreeTests
             RollbackCount++;
             return Task.FromResult("fake rollback");
         }
+        public Task<RepairPostconditionReport> VerifyPostconditionsAsync(
+            RepairAction action, Guid repairExecutionId, Guid? relatedRepairExecutionId,
+            CancellationToken cancellationToken = default) => Task.FromResult(
+                new RepairPostconditionReport(RepairPostconditionStatus.Verified, "Simulação fake verificada.")
+                {
+                    Conditions = Proposal.StructuredPostconditions.Select(condition =>
+                        new RepairConditionResult(condition.Kind, RepairConditionStatus.Verified)).ToArray()
+                });
     }
 }

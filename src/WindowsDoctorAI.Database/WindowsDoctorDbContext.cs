@@ -50,6 +50,13 @@ public sealed class RepairHistoryEntity
     public string AuditMetadataJson { get; set; } = "{}";
 }
 
+public sealed class RepairConsentUseEntity
+{
+    public Guid ConsentId { get; set; }
+    public Guid FirstRepairExecutionId { get; set; }
+    public long ConsumedAtUnixMilliseconds { get; set; }
+}
+
 /// <summary>Contexto SQLite local. O inicializador aplica migrações incrementais identificadas por PRAGMA user_version.</summary>
 public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbContext> options) : DbContext(options)
 {
@@ -58,6 +65,7 @@ public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbConte
     public DbSet<KnowledgeRuleEntity> KnowledgeRules => Set<KnowledgeRuleEntity>();
     public DbSet<KnowledgeBaseVersionEntity> KnowledgeBaseVersions => Set<KnowledgeBaseVersionEntity>();
     public DbSet<RepairHistoryEntity> RepairHistory => Set<RepairHistoryEntity>();
+    public DbSet<RepairConsentUseEntity> RepairConsentUses => Set<RepairConsentUseEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -97,6 +105,14 @@ public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbConte
             entity.HasIndex(item => item.CompletedAtUnixMilliseconds);
             entity.Property(item => item.Details).IsRequired();
             entity.Property(item => item.AuditMetadataJson).IsRequired();
+        });
+        modelBuilder.Entity<RepairConsentUseEntity>(entity =>
+        {
+            entity.ToTable("RepairConsentUses");
+            entity.HasKey(item => item.ConsentId);
+            entity.Property(item => item.ConsentId).ValueGeneratedNever();
+            entity.Property(item => item.FirstRepairExecutionId).IsRequired();
+            entity.Property(item => item.ConsumedAtUnixMilliseconds).IsRequired();
         });
     }
 }
