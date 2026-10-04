@@ -59,8 +59,12 @@ public sealed class HtmlDiagnosticReportFormatter
             builder.Append("<article class=\"item\"><h3>").Append(S(recommendation.Title, sourceInventory)).Append("</h3><p>").Append(S(recommendation.Domain, sourceInventory)).Append(" · impacto informado: ").Append(E(Label(recommendation.Impact))).Append(" · força do match literal: ").Append(E(Label(recommendation.Confidence))).AppendLine("</p>");
             builder.AppendLine("<p class=\"muted\">A força do match literal não é probabilidade de causa ou de sucesso; impacto e referências são declarações do pacote, não verificadas pelo aplicativo.</p>");
             builder.Append("<p>").Append(S(recommendation.Explanation, sourceInventory)).Append(" ").Append(S(recommendation.ConfidenceExplanation, sourceInventory)).AppendLine("</p>");
+            if (recommendation.OsTarget is not null)
+                builder.AppendLine("<p><strong>Alvo OS+build estruturado verificado:</strong> o inventário local conhecido passou pelo alvo declarado desta regra. Isso verifica elegibilidade da regra, não estabelece causa para o achado.</p>");
+            else
+                builder.AppendLine("<p><strong>Regra legada — aplicabilidade não verificada automaticamente:</strong> o texto de aplicabilidade é explicativo e não foi usado como filtro.</p>");
             if (!string.IsNullOrWhiteSpace(recommendation.Applicability))
-                builder.Append("<p><strong>Aplicabilidade declarada:</strong> ").Append(S(recommendation.Applicability, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Aplicabilidade declarada (texto explicativo; não usada como filtro):</strong> ").Append(S(recommendation.Applicability, sourceInventory)).AppendLine("</p>");
             AppendList(builder, "Causas descritas pela regra", recommendation.Causes, sourceInventory);
             AppendList(builder, "Soluções descritas pela regra (não executadas)", recommendation.Solutions, sourceInventory);
             if (recommendation.RequiredEvidence is { Count: > 0 })

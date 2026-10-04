@@ -30,7 +30,17 @@ public sealed record OperatingSystemDetails
     public string? Name { get; init; }
     public string? Version { get; init; }
     public string? Build { get; init; }
+    /// <summary>ProductType WMI allowlistado; null representa valor ausente, desconhecido ou inválido.</summary>
+    public OperatingSystemProductType? ProductType { get; init; }
     public TimeSpan? Uptime { get; init; }
+}
+
+/// <summary>Valores conhecidos da propriedade Win32_OperatingSystem.ProductType.</summary>
+public enum OperatingSystemProductType
+{
+    Workstation = 1,
+    DomainController = 2,
+    Server = 3
 }
 
 public sealed record ProcessorDetails

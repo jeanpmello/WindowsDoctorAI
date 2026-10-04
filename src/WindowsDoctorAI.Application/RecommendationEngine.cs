@@ -8,7 +8,8 @@ public sealed class RecommendationEngine
 {
     public IReadOnlyList<DiagnosticRecommendation> Recommend(
         DiagnosticReport report,
-        IEnumerable<KnowledgeRule> rules)
+        IEnumerable<KnowledgeRule> rules,
+        ComputerInventory? inventory = null)
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(rules);
@@ -18,6 +19,7 @@ public sealed class RecommendationEngine
         foreach (var rule in rules)
         {
             if (IsDisabledCbsCodeRule(rule)) continue;
+            if (rule.OsTarget is { } osTarget && !MatchesOperatingSystemTarget(osTarget, inventory)) continue;
             var matches = new List<(DiagnosticResult Result, string Indicator, bool ExactCode)>();
             foreach (var finding in findings)
             {
@@ -79,14 +81,18 @@ public sealed class RecommendationEngine
                 rule.Impact,
                 confidence,
                 confidenceExplanation,
-                $"Correspondência textual com a regra {rule.Id} v{rule.Version}: {matchedText}. A associação não confirma causa nem garante que uma solução funcione.",
+                $"Correspondência textual com a regra {rule.Id} v{rule.Version}: {matchedText}. "
+                + (rule.OsTarget is null
+                    ? "Regra legada: a aplicabilidade textual não foi verificada automaticamente. "
+                    : "O alvo OS+build estruturado foi verificado com o inventário local para elegibilidade; isso não confirma causalidade. ")
+                + "A associação não confirma causa nem garante que uma solução funcione.",
                 rule.Causes,
                 rule.Solutions,
                 evidence,
                 rule.References,
                 rule.Applicability,
                 rule.RequiredEvidence,
-                rule.Procedure));
+                rule.Procedure) { OsTarget = rule.OsTarget });
         }
 
         return recommendations
@@ -100,6 +106,33 @@ public sealed class RecommendationEngine
         string.Equals(rule.Match?.ExactErrorCode, "0x800F0831", StringComparison.OrdinalIgnoreCase)
         || rule.ErrorCodes.Any(code => string.Equals(code, "0x800F0831", StringComparison.OrdinalIgnoreCase))
         || rule.Symptoms.Any(symptom => ContainsToken(symptom, "0x800F0831"));
+
+    private static bool MatchesOperatingSystemTarget(KnowledgeOperatingSystemTarget target, ComputerInventory? inventory)
+    {
+        if (inventory?.OperatingSystem is not { } operatingSystem
+            || operatingSystem.ProductType is not { } productType
+            || !Enum.IsDefined(productType)
+            || !OperatingSystemBuildNumber.TryParseCanonicalPositive(operatingSystem.Build, out var build)
+            || target.Families is null
+            || target.Families.Count is 0 or > 2
+            || target.Families.Any(family => !Enum.IsDefined(family))
+            || target.Families.Distinct().Count() != target.Families.Count
+            || target.MinimumBuild is <= 0
+            || target.MaximumBuild is <= 0
+            || target.MinimumBuild.HasValue && target.MaximumBuild.HasValue && target.MinimumBuild > target.MaximumBuild)
+            return false;
+
+        var family = productType switch
+        {
+            OperatingSystemProductType.Workstation => KnowledgeOperatingSystemFamily.WindowsClient,
+            OperatingSystemProductType.DomainController or OperatingSystemProductType.Server => KnowledgeOperatingSystemFamily.WindowsServer,
+            _ => (KnowledgeOperatingSystemFamily?)null
+        };
+        return family is { } knownFamily
+            && target.Families.Contains(knownFamily)
+            && (!target.MinimumBuild.HasValue || build >= target.MinimumBuild.Value)
+            && (!target.MaximumBuild.HasValue || build <= target.MaximumBuild.Value);
+    }
 
     private static bool ContainsToken(string text, string token)
     {

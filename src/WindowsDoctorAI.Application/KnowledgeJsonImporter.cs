@@ -43,6 +43,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             MaxDepth = 16,
             UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
         };
+        options.Converters.Add(new KnowledgeOperatingSystemFamilyJsonConverter());
         options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false));
         return options;
     }
@@ -77,7 +78,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         }
         catch (JsonException exception)
         {
-            throw new InvalidDataException("JSON inválido ou fora do schema de conhecimento 1.0/1.1/1.2.", exception);
+            throw new InvalidDataException("JSON inválido ou fora do schema de conhecimento 1.0 a 1.4.", exception);
         }
 
         Validate(package);
@@ -87,11 +88,12 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
 
     private static void Validate(KnowledgePackage package)
     {
-        var strictSchema = package.SchemaVersion is "1.1" or "1.2" or "1.3";
-        var structuredSourceSchema = package.SchemaVersion is "1.2" or "1.3";
-        var structuredEvidenceSchema = package.SchemaVersion == "1.3";
+        var strictSchema = package.SchemaVersion is "1.1" or "1.2" or "1.3" or "1.4";
+        var structuredSourceSchema = package.SchemaVersion is "1.2" or "1.3" or "1.4";
+        var structuredEvidenceSchema = package.SchemaVersion is "1.3" or "1.4";
+        var operatingSystemTargetSchema = package.SchemaVersion == "1.4";
         if (!strictSchema && package.SchemaVersion != "1.0")
-            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0', '1.1', '1.2' ou '1.3'.");
+            throw new InvalidDataException("schemaVersion deve ser exatamente '1.0', '1.1', '1.2', '1.3' ou '1.4'.");
         ValidateText(package.Version, "version", 40);
         if (!Regex.IsMatch(package.Version, @"\A[A-Za-z0-9._-]{1,40}\z", RegexOptions.CultureInvariant))
             throw new InvalidDataException("version deve conter apenas letras, números, ponto, hífen ou sublinhado.");
@@ -128,13 +130,13 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             }
 
             if (strictSchema)
-                ValidateStrictRule(rule, structuredSourceSchema, structuredEvidenceSchema);
-            else if (rule.Applicability is not null || rule.Match is not null || rule.RequiredEvidence is not null || rule.Procedure is not null)
+                ValidateStrictRule(rule, structuredSourceSchema, structuredEvidenceSchema, operatingSystemTargetSchema);
+            else if (rule.Applicability is not null || rule.Match is not null || rule.RequiredEvidence is not null || rule.Procedure is not null || rule.OsTarget is not null)
                 throw new InvalidDataException($"A regra {rule.Id} usa campos do schema 1.1, mas o pacote declara 1.0.");
         }
     }
 
-    private static void ValidateStrictRule(KnowledgeRule rule, bool structuredSourceSchema, bool structuredEvidenceSchema)
+    private static void ValidateStrictRule(KnowledgeRule rule, bool structuredSourceSchema, bool structuredEvidenceSchema, bool operatingSystemTargetSchema)
     {
         ValidateText(rule.Applicability, $"applicability ({rule.Id})", 600);
         if (rule.Match is null)
@@ -196,6 +198,27 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             || !rule.Procedure.Rollback.Contains("indisponível", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidDataException("A regra 0x80073712 precisa permanecer privilegiada, modificadora e sem rollback disponível.");
 
+        if (operatingSystemTargetSchema)
+            ValidateOperatingSystemTarget(rule);
+        else if (rule.OsTarget is not null)
+            throw new InvalidDataException($"A regra {rule.Id} usa osTarget, disponível somente no schema 1.4.");
+
+    }
+
+    private static void ValidateOperatingSystemTarget(KnowledgeRule rule)
+    {
+        var target = rule.OsTarget;
+        if (target is null)
+            throw new InvalidDataException($"A regra {rule.Id} precisa declarar osTarget no schema 1.4.");
+        if (target.Families is null || target.Families.Count is 0 or > 2)
+            throw new InvalidDataException($"osTarget.families da regra {rule.Id} deve conter família WindowsClient e/ou WindowsServer.");
+        if (target.Families.Any(family => !Enum.IsDefined(family))
+            || target.Families.Distinct().Count() != target.Families.Count)
+            throw new InvalidDataException($"osTarget.families da regra {rule.Id} contém enum desconhecido ou família duplicada.");
+        if (target.MinimumBuild is <= 0 || target.MaximumBuild is <= 0)
+            throw new InvalidDataException($"osTarget.minimumBuild e maximumBuild da regra {rule.Id} devem ser inteiros positivos quando informados.");
+        if (target.MinimumBuild.HasValue && target.MaximumBuild.HasValue && target.MinimumBuild > target.MaximumBuild)
+            throw new InvalidDataException($"osTarget da regra {rule.Id} tem faixa de build invertida.");
     }
 
     private static void ValidateRequiredConditions(IReadOnlyList<string>? values, string field, string ruleId, int maximumLength)

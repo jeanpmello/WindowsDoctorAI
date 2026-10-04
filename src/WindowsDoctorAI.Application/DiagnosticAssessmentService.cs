@@ -18,7 +18,7 @@ public sealed class DiagnosticAssessmentService(
         var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(false);
         var recommendations = run.Report is null
             ? Array.Empty<DiagnosticRecommendation>()
-            : recommendationEngine.Recommend(run.Report, rules);
+            : recommendationEngine.Recommend(run.Report, rules, run.Inventory);
         var analysis = run.Report is null
             ? new RootCauseAnalysis("A execução não contém resultados diagnósticos; a causa raiz permanece indeterminada.", Array.Empty<CorrelationObservation>())
             : rootCauseAnalyzer.Analyze(run.Report);

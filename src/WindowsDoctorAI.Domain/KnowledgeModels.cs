@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace WindowsDoctorAI.Domain;
 
 /// <summary>Impacto editorial informado pela regra importada; não representa probabilidade nem severidade medida.</summary>
@@ -18,6 +21,37 @@ public enum MatchConfidence
     High
 }
 
+/// <summary>Famílias Windows aceitas no alvo estruturado de uma regra de conhecimento.</summary>
+[JsonConverter(typeof(KnowledgeOperatingSystemFamilyJsonConverter))]
+public enum KnowledgeOperatingSystemFamily
+{
+    WindowsClient,
+    WindowsServer
+}
+
+/// <summary>Conversor estrito: o contrato JSON usa os nomes PascalCase exatos e não aceita números.</summary>
+public sealed class KnowledgeOperatingSystemFamilyJsonConverter : JsonConverter<KnowledgeOperatingSystemFamily>
+{
+    public override KnowledgeOperatingSystemFamily Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException("A família de sistema operacional deve ser textual.");
+
+        return reader.GetString() switch
+        {
+            nameof(KnowledgeOperatingSystemFamily.WindowsClient) => KnowledgeOperatingSystemFamily.WindowsClient,
+            nameof(KnowledgeOperatingSystemFamily.WindowsServer) => KnowledgeOperatingSystemFamily.WindowsServer,
+            _ => throw new JsonException("Família de sistema operacional desconhecida.")
+        };
+    }
+
+    public override void Write(Utf8JsonWriter writer, KnowledgeOperatingSystemFamily value, JsonSerializerOptions options)
+    {
+        if (!Enum.IsDefined(value)) throw new JsonException("Família de sistema operacional desconhecida.");
+        writer.WriteStringValue(value.ToString());
+    }
+}
+
 /// <summary>Referência declarada pela origem do pacote. O app não verifica automaticamente sua autenticidade.</summary>
 public sealed record KnowledgeReference(string Title, string Url);
 
@@ -33,6 +67,12 @@ public sealed record KnowledgeMatchCondition(
     /// <summary>Tipos de evidência estruturada exigidos; quando há vários, qualquer um deles satisfaz a condição.</summary>
     public IReadOnlyList<string> RequiredEvidenceTypes { get; init; } = Array.Empty<string>();
 }
+
+/// <summary>Alvo explícito e inclusivo de família Windows e intervalo de builds para schema 1.4.</summary>
+public sealed record KnowledgeOperatingSystemTarget(
+    IReadOnlyList<KnowledgeOperatingSystemFamily> Families,
+    long? MinimumBuild,
+    long? MaximumBuild);
 
 /// <summary>Orientação declarativa; nunca é executada pela aplicação.</summary>
 public sealed record KnowledgeProcedure(
@@ -63,9 +103,13 @@ public sealed record KnowledgeRule(
     string? Applicability = null,
     KnowledgeMatchCondition? Match = null,
     IReadOnlyList<string>? RequiredEvidence = null,
-    KnowledgeProcedure? Procedure = null);
+    KnowledgeProcedure? Procedure = null)
+{
+    /// <summary>Disponível somente em schema 1.4; Applicability textual permanece explicativa.</summary>
+    public KnowledgeOperatingSystemTarget? OsTarget { get; init; }
+}
 
-/// <summary>Envelope JSON suportado pelo importador (schemas 1.0 e 1.1).</summary>
+/// <summary>Envelope JSON suportado pelo importador (schemas 1.0 a 1.4).</summary>
 public sealed record KnowledgePackage(
     string SchemaVersion,
     string Version,
@@ -96,7 +140,11 @@ public sealed record DiagnosticRecommendation(
     IReadOnlyList<KnowledgeReference> References,
     string? Applicability = null,
     IReadOnlyList<string>? RequiredEvidence = null,
-    KnowledgeProcedure? Procedure = null);
+    KnowledgeProcedure? Procedure = null)
+{
+    /// <summary>Não nulo somente quando o matcher verificou o alvo estruturado contra inventário válido.</summary>
+    public KnowledgeOperatingSystemTarget? OsTarget { get; init; }
+}
 
 public sealed record RootCauseEvidence(
     string ScannerName,

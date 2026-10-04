@@ -21,6 +21,8 @@ Mudanças relevantes do Windows Doctor AI.
 - Serviço local de relatório HTML com resumo, score, evidências, recomendações, referências e histórico; sem PDF ou fluxo de exportação visual.
 - Testes de unidade e SQLite para importação, versão do schema, confiança, correlação, confirmação, histórico e escaping HTML.
 - Metadata `SourceMetadata` normalizado/allowlist para provider do Event Log, matching do piloto por campo estruturado, e redaction uniforme da mensagem bruta em SQLite, UI e HTML; schema do pacote atualizado para 1.2.
+- Coleta local de `Win32_OperatingSystem.ProductType` como enum allowlistado e validação do `BuildNumber` decimal canônico; schema 1.4 exige alvo OS+build para regras novas e a avaliação falha fechado quando o inventário é desconhecido.
+- Relatório distingue alvo estruturado verificado de aplicabilidade textual legada não verificada; sem alegação causal ou exposição de ProductType/build na explicação.
 - README, arquitetura, roadmap, segurança e documentação do banco atualizados.
 
 ### Notes

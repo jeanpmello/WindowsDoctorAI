@@ -35,7 +35,7 @@ public sealed class WindowsManagementInventoryDataSource(ILogger<WindowsManageme
         cancellationToken.ThrowIfCancellationRequested();
         var system = First("SELECT Manufacturer, Model, Domain, TotalPhysicalMemory FROM Win32_ComputerSystem");
         var biosRow = First("SELECT Manufacturer, SMBIOSBIOSVersion, Version, SerialNumber, ReleaseDate FROM Win32_BIOS");
-        var osRow = First("SELECT Caption, Version, BuildNumber, LastBootUpTime FROM Win32_OperatingSystem");
+        var osRow = First(WindowsOperatingSystemMetadata.WmiQuery);
         var processorRows = Rows("SELECT Name, NumberOfCores, NumberOfLogicalProcessors FROM Win32_Processor");
         var gpuRows = Rows("SELECT Name, AdapterRAM FROM Win32_VideoController");
         var physicalDiskRows = Rows("SELECT DeviceID, Model, Size, MediaType, InterfaceType FROM Win32_DiskDrive");
@@ -76,7 +76,8 @@ public sealed class WindowsManagementInventoryDataSource(ILogger<WindowsManageme
             {
                 Name = Text(osRow, "Caption"),
                 Version = Text(osRow, "Version"),
-                Build = Text(osRow, "BuildNumber"),
+                Build = OperatingSystemBuildNumber.Normalize(RawText(osRow, "BuildNumber")),
+                ProductType = WindowsOperatingSystemMetadata.ParseProductType(RawText(osRow, "ProductType")),
                 Uptime = uptime is { Ticks: >= 0 } ? uptime : null
             },
             Processor = new ProcessorDetails
@@ -204,6 +205,8 @@ public sealed class WindowsManagementInventoryDataSource(ILogger<WindowsManageme
     }
     private static ulong? ToUInt64(IReadOnlyDictionary<string, string?>? row, string key) =>
         ulong.TryParse(Text(row, key), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+    private static string? RawText(IReadOnlyDictionary<string, string?>? row, string key) =>
+        row is not null && row.TryGetValue(key, out var value) ? value : null;
     private static string? JoinDistinct(IEnumerable<IReadOnlyDictionary<string, string?>>? rows, string key)
     {
         var names = rows?.Select(row => Text(row, key)).Where(value => value is not null).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
