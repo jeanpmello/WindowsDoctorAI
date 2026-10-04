@@ -76,7 +76,17 @@ public sealed class WindowsPowerShellBackupSetCatalogCommandRunner : IWindowsBac
                         [Console]::Out.WriteLine('{"status":"unavailable"}')
                         exit 0
                     }
-                    $backupTimeUtc = $rawTime.ToUniversalTime()
+                    $kind = $rawTime.Kind
+                    if ($kind -eq [System.DateTimeKind]::Local) {
+                        $backupTimeUtc = $rawTime.ToUniversalTime()
+                    }
+                    elseif ($kind -eq [System.DateTimeKind]::Utc) {
+                        $backupTimeUtc = $rawTime
+                    }
+                    else {
+                        [Console]::Out.WriteLine('{"status":"unavailable"}')
+                        exit 0
+                    }
                 }
                 else {
                     [Console]::Out.WriteLine('{"status":"unavailable"}')
@@ -86,7 +96,6 @@ public sealed class WindowsPowerShellBackupSetCatalogCommandRunner : IWindowsBac
                 $safeType = 'Other'
                 switch ($typeProperty.Value.ToString().Trim().ToLowerInvariant()) {
                     'full' { $safeType = 'Full' }
-                    'normal' { $safeType = 'Full' }
                     'incremental' { $safeType = 'Incremental' }
                     'differential' { $safeType = 'Differential' }
                 }
@@ -94,12 +103,11 @@ public sealed class WindowsPowerShellBackupSetCatalogCommandRunner : IWindowsBac
                 $backupTimeText = $backupTimeUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ", [Globalization.CultureInfo]::InvariantCulture)
                 # Conta somente a coleção direta em WBBackupSet; nenhum membro de WBVolume é lido.
                 $volumeProperty = $set.PSObject.Properties['Volume']
-                if ($null -ne $volumeProperty) {
+                $volumeCount = $null
+                $hasVolumeCount = $false
+                if ($null -ne $volumeProperty -and $null -ne $volumeProperty.Value) {
                     $volumeValue = $volumeProperty.Value
-                    if ($null -eq $volumeValue) {
-                        $volumeCount = 0
-                    }
-                    elseif ($volumeValue -is [string]) {
+                    if ($volumeValue -is [string]) {
                         [Console]::Out.WriteLine('{"status":"unavailable"}')
                         exit 0
                     }
@@ -110,20 +118,17 @@ public sealed class WindowsPowerShellBackupSetCatalogCommandRunner : IWindowsBac
                         [Console]::Out.WriteLine('{"status":"invalid_response"}')
                         exit 0
                     }
-                    $safeSet = [pscustomobject][ordered]@{
-                        versionId = [string]$versionId
-                        backupTimeUtc = [string]$backupTimeText
-                        backupType = [string]$safeType
-                        volumeCount = [int]$volumeCount
-                    }
+                    $hasVolumeCount = $true
                 }
-                else {
-                    $safeSet = [pscustomobject][ordered]@{
-                        versionId = [string]$versionId
-                        backupTimeUtc = [string]$backupTimeText
-                        backupType = [string]$safeType
-                    }
+                $safeSet = [ordered]@{
+                    versionId = [string]$versionId
+                    backupTimeUtc = [string]$backupTimeText
+                    backupType = [string]$safeType
                 }
+                if ($hasVolumeCount) {
+                    $safeSet['volumeCount'] = [int]$volumeCount
+                }
+                $safeSet = [pscustomobject]$safeSet
                 $safeSets.Add($safeSet)
             }
 

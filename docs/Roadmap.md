@@ -15,11 +15,11 @@ Este roadmap distingue componentes implementados de integração visual, valida�
 - Dashboard, cobertura, evidências, persistência do relatório e testes com fontes substitutas.
 - Scanners somente de leitura; sem modificações de sistema.
 - No Event Viewer genérico, o evento com provider `Microsoft-Windows-WindowsUpdateClient`, channel `Microsoft-Windows-WindowsUpdateClient/Operational` e HRESULT `0x800F0831` é suprimido na origem, independentemente do Event ID; não gera Finding, Recommendation ou estado Healthy nem conteúdo para histórico/HTML. É uma supressão temporária da tupla exata até haver chave confiável de correlação CBS↔EventRecord.
-- O scanner de backup consulta `Get-WBBackupSet` pelo Windows PowerShell existente e mostra apenas contagem, data e tipo minimizados; presença de metadados não comprova integridade nem capacidade de restauração.
+- O scanner tem uma consulta implementada a `Get-WBBackupSet` pelo Windows PowerShell e mostra apenas metadados minimizados; o contrato runtime permanece não validado. O catálogo não está confirmado em Windows Server 2019 até um smoke test em host real; presença de metadados não comprova integridade nem capacidade de restauração.
 - Há somente um planejador isolado de prévia sintética: exige conjunto/versão/volume/item conhecidos na lista sintética fornecida, origem e destino alternativo absolutos distintos, bloqueia sobrescrita e fixa a política `CreateCopy`. Não está ligado à UI nem a uma fonte real de itens WSB, não consulta o filesystem e não gera comando copiável.
-- Os testes Linux usam runner falso e fixtures JSON sintéticas. Eles validam parsing/estados e não simulam nem certificam Windows Server 2019 real.
+- Os testes Linux usam runner falso e fixtures JSON sintéticas de saída normalizada; verificações do script cobrem regras de fail-closed, mas não executam PowerShell/WSB nem validam o contrato dos objetos runtime.
 
-Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, SMART, hardware e `Get-WBBackupSet` em Windows representativo, inclusive Server 2019.
+Ainda falta validar XAML/WinUI, WUA, Registro, WMI, Event Viewer, permissões, SMART, hardware e `Get-WBBackupSet` em Windows representativo. Em particular, o catálogo WSB só poderá ser considerado confirmado em Server 2019 após smoke test nesse sistema real.
 
 ## Milestone 3 — Knowledge & Repair Platform (fluxos principais implementados; validação Windows pendente)
 

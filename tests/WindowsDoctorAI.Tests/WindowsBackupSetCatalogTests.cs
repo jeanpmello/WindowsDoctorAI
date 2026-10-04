@@ -117,6 +117,51 @@ public sealed class WindowsBackupSetCatalogTests
     }
 
     [Fact]
+    public async Task SyntheticFixturesKeepUnknownTypesAndNullVolumesDistinctFromEmptyCollections()
+    {
+        var fixturePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "backup-set-catalog-fail-closed.json");
+        var json = await File.ReadAllTextAsync(fixturePath);
+        var result = await Source(json).GetCatalogAsync();
+
+        Assert.Equal(BackupSetCatalogStatus.Available, result.Status);
+        var unknownType = Assert.Single(result.BackupSets, entry => entry.VersionId == "unknown-type");
+        Assert.Equal(BackupSetType.Other, unknownType.BackupType);
+        var nullVolume = Assert.Single(result.BackupSets, entry => entry.VersionId == "null-volume");
+        Assert.Null(nullVolume.VolumeCount);
+        var emptyVolume = Assert.Single(result.BackupSets, entry => entry.VersionId == "empty-volume");
+        Assert.Equal(0, emptyVolume.VolumeCount);
+    }
+
+    [Fact]
+    public void QueryScriptFailsClosedForUnknownTypesNullVolumesAndUnspecifiedDateTimes()
+    {
+        var scriptField = typeof(WindowsPowerShellBackupSetCatalogCommandRunner).GetField("QueryScript", BindingFlags.NonPublic | BindingFlags.Static);
+        var script = Assert.IsType<string>(scriptField?.GetValue(null));
+
+        Assert.Contains("$safeType = 'Other'", script, StringComparison.Ordinal);
+        Assert.Contains("'full' { $safeType = 'Full' }", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("'normal'", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("$hasVolumeCount = $false", script, StringComparison.Ordinal);
+        Assert.Contains("if ($null -ne $volumeProperty -and $null -ne $volumeProperty.Value)", script, StringComparison.Ordinal);
+        Assert.Contains("if ($hasVolumeCount)", script, StringComparison.Ordinal);
+        Assert.Contains("$safeSet['volumeCount'] = [int]$volumeCount", script, StringComparison.Ordinal);
+
+        var kindStart = script.IndexOf("$kind = $rawTime.Kind", StringComparison.Ordinal);
+        var kindEnd = script.IndexOf("$backupTimeText =", kindStart, StringComparison.Ordinal);
+        Assert.True(kindStart >= 0 && kindEnd > kindStart, "O tratamento de DateTime precisa permanecer explícito e anterior à serialização.");
+        var kindHandling = script[kindStart..kindEnd];
+        Assert.Contains("$kind -eq [System.DateTimeKind]::Local", kindHandling, StringComparison.Ordinal);
+        Assert.Contains("$rawTime.ToUniversalTime()", kindHandling, StringComparison.Ordinal);
+        Assert.Contains("$kind -eq [System.DateTimeKind]::Utc", kindHandling, StringComparison.Ordinal);
+        Assert.Contains("$backupTimeUtc = $rawTime", kindHandling, StringComparison.Ordinal);
+        var unspecifiedBranchStart = kindHandling.IndexOf("else {", StringComparison.Ordinal);
+        Assert.True(unspecifiedBranchStart >= 0, "DateTime sem Kind explícito deve ter ramo de rejeição.");
+        var unspecifiedBranch = kindHandling[unspecifiedBranchStart..];
+        Assert.Contains("\"status\":\"unavailable\"", unspecifiedBranch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ToUniversalTime", unspecifiedBranch, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CatalogRunnerUsesOnlyTheReadOnlyAllowlistedCommandAndNoBrowseOrRestoreSurface()
     {
         var runnerInterfaceMethods = typeof(IWindowsBackupSetCatalogCommandRunner).GetMethods().Select(method => method.Name).ToArray();

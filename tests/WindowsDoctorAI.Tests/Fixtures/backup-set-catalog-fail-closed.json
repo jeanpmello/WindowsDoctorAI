@@ -1,0 +1,22 @@
+{
+  "status": "available",
+  "backupSets": [
+    {
+      "versionId": "unknown-type",
+      "backupTimeUtc": "2026-10-01T08:30:00.0000000Z",
+      "backupType": "Other",
+      "volumeCount": 1
+    },
+    {
+      "versionId": "null-volume",
+      "backupTimeUtc": "2026-10-02T08:30:00.0000000Z",
+      "backupType": "Full"
+    },
+    {
+      "versionId": "empty-volume",
+      "backupTimeUtc": "2026-10-03T08:30:00.0000000Z",
+      "backupType": "Full",
+      "volumeCount": 0
+    }
+  ]
+}
