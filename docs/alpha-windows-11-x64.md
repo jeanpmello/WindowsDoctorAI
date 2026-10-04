@@ -1,12 +1,12 @@
 # Alpha de diagnóstico — Windows 11 x64
 
-Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow manual `Alpha package (Windows 11 x64)`. O artefato contém a pasta publicada do app e este guia (`README-ALPHA.md`). Não é MSIX nem instalador: não requer Visual Studio, .NET SDK, certificado de desenvolvedor ou identidade de editor no computador de destino. O workflow não cria Release do GitHub nem assina o executável.
+Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow `Alpha package (Windows 11 x64)`. O artefato contém a pasta publicada do app e este guia (`README-ALPHA.md`). Não é MSIX nem instalador: não requer Visual Studio, .NET SDK, certificado de desenvolvedor ou identidade de editor no computador de destino. O workflow não cria Release do GitHub nem assina o executável.
 
 ## Baixar e iniciar
 
-1. No repositório, abra **Actions** e selecione **Alpha package (Windows 11 x64)**.
-2. Escolha **Run workflow** na branch preparada para a Alpha e aguarde build, testes e verificações do pacote concluírem com sucesso.
-3. Baixe o artefato `WindowsDoctorAI-alpha-win11-x64` da execução concluída; o download do artefato é um ZIP.
+1. No repositório, abra **Actions** e selecione **Windows CI**.
+2. Escolha **Run workflow**, selecione a branch preparada para a Alpha e inicie a execução. Nessa branch, o workflow CI chama o workflow reutilizável `Alpha package (Windows 11 x64)` após o build e os testes.
+3. Aguarde os jobs `Build and test (Windows)` e `Package Alpha artifact` concluírem com sucesso. Baixe `WindowsDoctorAI-alpha-win11-x64` da execução; o download do artefato é um ZIP.
 4. Extraia-o para uma pasta local e execute `WindowsDoctorAI.App.exe`.
 
 Use esta build somente em **Windows 11 x64**. Windows 10, Windows Server (incluindo Server 2019) e Windows em ARM não são alvos afirmados ou validados por esta Alpha. O workflow não assina o executável em nome do projeto nem declara identidade de editor ou confiança de certificado; o Windows pode identificá-lo como aplicativo de publicador desconhecido. Não existe etapa para instalar ou confiar em certificado.
