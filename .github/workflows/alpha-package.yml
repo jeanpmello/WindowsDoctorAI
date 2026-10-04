@@ -2,6 +2,12 @@ name: Alpha package (Windows 11 x64)
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      skip_build_and_test:
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,9 +33,11 @@ jobs:
         uses: microsoft/setup-msbuild@v3
 
       - name: Build solution with WinUI/XAML
+        if: ${{ !inputs.skip_build_and_test }}
         run: msbuild .\WindowsDoctorAI.sln /restore /p:Configuration=Release
 
       - name: Run test suite
+        if: ${{ !inputs.skip_build_and_test }}
         run: dotnet test .\tests\WindowsDoctorAI.Tests\WindowsDoctorAI.Tests.csproj --configuration Release --no-build --no-restore
 
       - name: Publish unpackaged self-contained app for win-x64

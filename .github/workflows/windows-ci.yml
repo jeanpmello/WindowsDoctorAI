@@ -27,3 +27,10 @@ jobs:
 
       - name: Run test suite
         run: dotnet test tests/WindowsDoctorAI.Tests/WindowsDoctorAI.Tests.csproj --configuration Release --no-build --no-restore
+
+  package-alpha:
+    name: Package Alpha artifact
+    needs: build-and-test
+    uses: ./.github/workflows/alpha-package.yml
+    with:
+      skip_build_and_test: true
