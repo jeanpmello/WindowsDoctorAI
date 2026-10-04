@@ -38,10 +38,13 @@ public static class DiagnosticsServiceCollectionExtensions
         {
             services.AddSingleton<IWindowsBackupCommandRunner, WindowsPowerShellBackupCommandRunner>();
             services.AddSingleton<IWindowsBackupDataSource, WindowsBackupDataSource>();
+            services.AddSingleton<IWindowsBackupSetCatalogCommandRunner, WindowsPowerShellBackupSetCatalogCommandRunner>();
+            services.AddSingleton<IBackupSetCatalogSource, WindowsBackupSetCatalogDataSource>();
         }
         else
         {
             services.AddSingleton<IWindowsBackupDataSource, UnsupportedWindowsBackupDataSource>();
+            services.AddSingleton<IBackupSetCatalogSource, UnsupportedBackupSetCatalogSource>();
         }
 
         services.AddSingleton<IDiagnosticScanner, WindowsBackupDiagnosticScanner>();

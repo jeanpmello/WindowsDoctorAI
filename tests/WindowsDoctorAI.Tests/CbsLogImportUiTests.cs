@@ -44,7 +44,8 @@ public sealed class CbsLogImportUiTests
         var picker = new TestCbsLogPicker(Encoding.UTF8.GetBytes(cbsText));
         var viewModel = new HomeViewModel(
             runUseCase, history, knowledge, new KnowledgeJsonImporter(knowledge), assessment,
-            new CbsLogImportService(picker, new CbsLogMarkerClassifier()), viewModelLogger);
+            new CbsLogImportService(picker, new CbsLogMarkerClassifier()),
+            new UnsupportedBackupSetCatalogSource(), viewModelLogger);
 
         await viewModel.StartDiagnosticCommand.ExecuteAsync(null);
         Assert.True(viewModel.CanAnalyzeCbsLog);

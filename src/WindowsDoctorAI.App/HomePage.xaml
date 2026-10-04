@@ -75,6 +75,35 @@
                 </StackPanel>
             </Border>
 
+            <Border Style="{StaticResource InventoryCardStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Versões de backup disponíveis" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBlock Text="A lista é consultada somente quando você pedir e permanece temporária nesta tela. Exibe apenas ID opaco, data UTC, tipo normalizado e contagem de volumes quando disponível; não inclui nomes, caminhos, host ou arquivos." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Content="Atualizar versões" Command="{Binding RefreshBackupSetCatalogCommand}" />
+                        <Button Content="Cancelar consulta" Command="{Binding CancelBackupSetCatalogCommand}" IsEnabled="{Binding IsLoadingBackupSetCatalog}" />
+                        <ProgressRing IsActive="{Binding IsLoadingBackupSetCatalog}" Width="22" Height="22" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding BackupSetCatalogStatusText}" TextWrapping="Wrap" />
+                    <ItemsControl ItemsSource="{Binding BackupSetCatalogEntries}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1" Padding="0,8,0,8">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Text="{Binding VersionId}" FontWeight="SemiBold" IsTextSelectionEnabled="True" />
+                                        <TextBlock Text="{Binding BackupTimeText}" />
+                                        <TextBlock Text="{Binding BackupTypeText}" />
+                                        <TextBlock Text="{Binding VolumeCountText}" />
+                                        <TextBlock Text="{Binding VerificationText}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="A presença no catálogo não comprova integridade nem recuperabilidade. Esta tela não navega volumes e não oferece restauração." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" />
+                </StackPanel>
+            </Border>
+
             <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
                 <Border Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="6"><TextBlock Text="Problemas críticos" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding CriticalProblemsText}" FontSize="24" FontWeight="SemiBold" /></StackPanel>

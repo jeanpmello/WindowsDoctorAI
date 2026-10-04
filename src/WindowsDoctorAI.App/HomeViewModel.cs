@@ -16,6 +16,7 @@ internal partial class HomeViewModel(
     KnowledgeJsonImporter knowledgeImporter,
     DiagnosticAssessmentService assessmentService,
     CbsLogImportService cbsLogImportService,
+    IBackupSetCatalogSource backupSetCatalogSource,
     ILogger<HomeViewModel> logger) : ObservableObject
 {
     private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
@@ -64,9 +65,22 @@ internal partial class HomeViewModel(
     [ObservableProperty] private string _cbsLogDisclaimer = string.Empty;
     [ObservableProperty] private bool _isImportingPackage;
     [ObservableProperty] private bool _canSelectKnowledgePackage = true;
+    [ObservableProperty] private bool _isLoadingBackupSetCatalog;
+    [ObservableProperty] private string _backupSetCatalogStatusText = "Catálogo não consultado. Selecione Atualizar para listar metadados temporários.";
+    [ObservableProperty] private IReadOnlyList<BackupSetCatalogDisplayItem> _backupSetCatalogEntries = Array.Empty<BackupSetCatalogDisplayItem>();
 
     private string? _pendingPackageJson;
     private DiagnosticRun? _currentRun;
+    private CancellationTokenSource? _backupSetCatalogCancellation;
+
+    private bool CanRefreshBackupSetCatalog() => !IsLoadingBackupSetCatalog;
+    private bool CanCancelBackupSetCatalog() => IsLoadingBackupSetCatalog;
+
+    partial void OnIsLoadingBackupSetCatalogChanged(bool value)
+    {
+        RefreshBackupSetCatalogCommand.NotifyCanExecuteChanged();
+        CancelBackupSetCatalogCommand.NotifyCanExecuteChanged();
+    }
 
     partial void OnIsScanningChanged(bool value)
     {
@@ -108,6 +122,103 @@ internal partial class HomeViewModel(
         CbsLogSignal = string.Empty;
         CbsLogDisclaimer = string.Empty;
     }
+
+    [RelayCommand(CanExecute = nameof(CanRefreshBackupSetCatalog))]
+    private async Task RefreshBackupSetCatalogAsync()
+    {
+        using var cancellationSource = new CancellationTokenSource();
+        _backupSetCatalogCancellation = cancellationSource;
+        IsLoadingBackupSetCatalog = true;
+        BackupSetCatalogEntries = Array.Empty<BackupSetCatalogDisplayItem>();
+        BackupSetCatalogStatusText = "Consultando o catálogo local somente de leitura...";
+        try
+        {
+            var catalog = await backupSetCatalogSource.GetCatalogAsync(cancellationSource.Token).ConfigureAwait(true);
+            if (catalog is null || catalog.BackupSets is null)
+            {
+                BackupSetCatalogStatusText = "Resposta inválida; nenhum metadado foi exibido.";
+                return;
+            }
+
+            switch (catalog.Status)
+            {
+                case BackupSetCatalogStatus.Available when IsSafeCatalog(catalog.BackupSets):
+                    BackupSetCatalogEntries = catalog.BackupSets
+                        .OrderByDescending(entry => entry.BackupTimeUtc)
+                        .Select(ToCatalogDisplayItem)
+                        .ToArray();
+                    BackupSetCatalogStatusText = $"{BackupSetCatalogEntries.Count} versão(ões) listada(s), não verificadas. Nenhum arquivo foi lido e nenhuma restauração foi iniciada.";
+                    break;
+                case BackupSetCatalogStatus.NoBackupSets when catalog.BackupSets.Count == 0:
+                    BackupSetCatalogStatusText = "Nenhuma versão retornada por esta consulta. Isso não exclui outras fontes de backup.";
+                    break;
+                case BackupSetCatalogStatus.ModuleUnavailable:
+                    BackupSetCatalogStatusText = "Windows Server Backup não está disponível neste ambiente.";
+                    break;
+                case BackupSetCatalogStatus.AccessDenied:
+                    BackupSetCatalogStatusText = "A consulta foi negada para a conta atual. Nenhuma elevação foi solicitada.";
+                    break;
+                case BackupSetCatalogStatus.TooManyBackupSets:
+                    BackupSetCatalogStatusText = $"O catálogo excede o limite de {BackupSetCatalogLimits.MaximumBackupSets} versões; a lista foi descartada.";
+                    break;
+                case BackupSetCatalogStatus.TimedOut:
+                    BackupSetCatalogStatusText = "A consulta expirou e foi encerrada; tente novamente quando desejar.";
+                    break;
+                case BackupSetCatalogStatus.InvalidResponse:
+                    BackupSetCatalogStatusText = "Resposta inválida ou fora dos limites; nenhum metadado foi exibido.";
+                    break;
+                default:
+                    BackupSetCatalogStatusText = "Catálogo indisponível; a consulta não forneceu metadados utilizáveis.";
+                    break;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationSource.IsCancellationRequested)
+        {
+            BackupSetCatalogEntries = Array.Empty<BackupSetCatalogDisplayItem>();
+            BackupSetCatalogStatusText = "Consulta cancelada; nenhum metadado foi mantido.";
+        }
+        catch (Exception)
+        {
+            BackupSetCatalogEntries = Array.Empty<BackupSetCatalogDisplayItem>();
+            BackupSetCatalogStatusText = "Não foi possível consultar o catálogo; detalhes internos foram omitidos.";
+        }
+        finally
+        {
+            _backupSetCatalogCancellation = null;
+            IsLoadingBackupSetCatalog = false;
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCancelBackupSetCatalog))]
+    private void CancelBackupSetCatalog() => _backupSetCatalogCancellation?.Cancel();
+
+    private static bool IsSafeCatalog(IReadOnlyList<BackupSetCatalogEntry> entries)
+    {
+        if (entries.Count is < 1 or > BackupSetCatalogLimits.MaximumBackupSets)
+            return false;
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        return entries.All(entry => entry is not null &&
+            !string.IsNullOrWhiteSpace(entry.VersionId) &&
+            entry.VersionId.Length <= BackupSetCatalogLimits.MaximumVersionIdCharacters &&
+            entry.VersionId.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.') &&
+            seenIds.Add(entry.VersionId) &&
+            entry.BackupTimeUtc.Offset == TimeSpan.Zero &&
+            Enum.IsDefined(entry.BackupType) &&
+            (entry.VolumeCount is null or >= 0 and <= BackupSetCatalogLimits.MaximumVolumeCount));
+    }
+
+    private static BackupSetCatalogDisplayItem ToCatalogDisplayItem(BackupSetCatalogEntry entry) => new(
+        entry.VersionId,
+        entry.BackupTimeUtc.UtcDateTime.ToString("dd/MM/yyyy HH:mm:ss 'UTC'", BrazilianCulture),
+        entry.BackupType switch
+        {
+            BackupSetType.Full => "Completo",
+            BackupSetType.Incremental => "Incremental",
+            BackupSetType.Differential => "Diferencial",
+            _ => "Outro/indeterminado"
+        },
+        entry.VolumeCount is int count ? $"{count} volume(s)" : "Quantidade de volumes não informada",
+        "Não verificado");
 
     public Task PreviewKnowledgePackageAsync(string json)
     {
@@ -403,3 +514,10 @@ internal partial class HomeViewModel(
     private static string Join(IReadOnlyList<string> addresses) => addresses.Count == 0 ? "Nenhum endereço encontrado" : string.Join(" · ", addresses);
     private static string FormatDuration(TimeSpan duration) => duration.TotalSeconds < 1 ? "menos de 1 segundo" : $"{duration.TotalSeconds.ToString("N1", BrazilianCulture)} s";
 }
+
+internal sealed record BackupSetCatalogDisplayItem(
+    string VersionId,
+    string BackupTimeText,
+    string BackupTypeText,
+    string VolumeCountText,
+    string VerificationText);

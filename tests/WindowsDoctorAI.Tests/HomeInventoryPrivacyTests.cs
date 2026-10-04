@@ -64,6 +64,7 @@ public sealed class HomeInventoryPrivacyTests
         var viewModel = new HomeViewModel(
             useCase, history, knowledge, new KnowledgeJsonImporter(knowledge), assessment,
             new CbsLogImportService(new NoCbsLogPicker(), new CbsLogMarkerClassifier()),
+            new UnsupportedBackupSetCatalogSource(),
             NullLogger<HomeViewModel>.Instance);
 
         DiagnosticRun originalRun;
