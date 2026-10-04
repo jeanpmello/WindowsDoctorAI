@@ -39,7 +39,11 @@ WindowsDoctorAI.sln
 
 **Core** é desktop/local. **Enterprise** (agente + servidor central + painel multi-máquina) é apenas roadmap e não está implementado. Consulte [Architecture](docs/Architecture.md), [Roadmap](docs/Roadmap.md), [Security](docs/Security.md), [Database](docs/Database.md), [PROJECT_RULES.md](PROJECT_RULES.md) e [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Pré-requisitos e execução em Windows
+## Alpha de diagnóstico — Windows 11 x64
+
+A distribuição inicial é um artefato ZIP unpackaged self-contained, sem assinatura e sem instalador. Consulte [o guia da Alpha](docs/alpha-windows-11-x64.md) para baixar o artefato do workflow manual, executar o app, conferir a dependência do Visual C++ Redistributable e conhecer os limites de validação. Esta build não declara suporte a Windows Server nem a outras arquiteturas.
+
+## Pré-requisitos para desenvolvimento em Windows
 
 - Windows 10 (build mínimo `10.0.17763.0`) ou Windows 11 para UI e consultas nativas.
 - [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) e Visual Studio 2022 com ferramentas WinUI/Desktop recomendadas.
