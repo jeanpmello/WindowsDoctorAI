@@ -434,6 +434,80 @@ public sealed class DiagnosticPrivacyRetentionTests
     }
 
     [Fact]
+    public async Task FailedMigrationFromSchemaV2RollsBackCompletelyAndCanBeRetried()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        const string legacyPayload = "{\"legacy\":\"rollback-and-retry\"}";
+        var legacyId = Guid.NewGuid().ToString("N");
+        var completedAt = FixedNow.ToUnixTimeMilliseconds();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                CREATE TABLE "DiagnosticRuns" (
+                    "Id" TEXT NOT NULL PRIMARY KEY,
+                    "CompletedAtUnixMilliseconds" INTEGER NOT NULL,
+                    "PayloadJson" TEXT NOT NULL);
+                INSERT INTO "DiagnosticRuns" VALUES ($id, $completed, $payload);
+                CREATE TABLE "UserSettings" (
+                    "Id" INTEGER NOT NULL PRIMARY KEY,
+                    "SaveDiagnosticHistory" INTEGER NOT NULL);
+                INSERT INTO "UserSettings" VALUES (1, 1);
+                PRAGMA user_version = 2;
+                CREATE TRIGGER "BlockSaveDiagnosticHistoryOptInMigration"
+                BEFORE UPDATE OF "SaveDiagnosticHistory" ON "UserSettings"
+                WHEN OLD."SaveDiagnosticHistory" = 1 AND NEW."SaveDiagnosticHistory" = 0
+                BEGIN
+                    SELECT RAISE(ABORT, 'synthetic migration failure');
+                END;
+                """;
+            command.Parameters.AddWithValue("$id", legacyId);
+            command.Parameters.AddWithValue("$completed", completedAt);
+            command.Parameters.AddWithValue("$payload", legacyPayload);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+
+        var failure = await Assert.ThrowsAsync<SqliteException>(() => WindowsDoctorDatabaseMigrator.MigrateAsync(context));
+
+        Assert.Contains("synthetic migration failure", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(2, await ReadDatabaseVersionAsync(connection));
+        Assert.Equal(["Id", "CompletedAtUnixMilliseconds", "PayloadJson"], await ReadColumnNamesAsync(connection, "DiagnosticRuns"));
+        Assert.Equal(["Id", "SaveDiagnosticHistory"], await ReadColumnNamesAsync(connection, "UserSettings"));
+        Assert.Empty(await ReadMigrationSchemaObjectsAsync(connection));
+        await AssertLegacyDiagnosticRunAsync(connection, legacyId, completedAt, legacyPayload);
+        Assert.Equal(1, await ReadSaveDiagnosticHistoryAsync(connection));
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DROP TRIGGER \"BlockSaveDiagnosticHistoryOptInMigration\";";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context);
+
+        Assert.Equal(WindowsDoctorDatabaseMigrator.CurrentVersion, await ReadDatabaseVersionAsync(connection));
+        Assert.Equal(["Id", "CompletedAtUnixMilliseconds", "PayloadJson"], await ReadColumnNamesAsync(connection, "DiagnosticRuns"));
+        Assert.Equal(["Id", "SaveDiagnosticHistory", "DiagnosticRetentionDays"], await ReadColumnNamesAsync(connection, "UserSettings"));
+        Assert.Equal(
+            [
+                "index:IX_KnowledgeRules_RuleId_RuleVersion",
+                "index:IX_RepairHistory_CompletedAtUnixMilliseconds",
+                "table:KnowledgeBaseVersions",
+                "table:KnowledgeRules",
+                "table:RepairHistory"
+            ],
+            await ReadMigrationSchemaObjectsAsync(connection));
+        await AssertLegacyDiagnosticRunAsync(connection, legacyId, completedAt, legacyPayload);
+        Assert.Equal(0, await ReadSaveDiagnosticHistoryAsync(connection));
+        var settings = await new SqliteUserSettingsRepository(context).GetAsync();
+        Assert.False(settings.SaveDiagnosticHistory);
+        Assert.Equal(0, settings.DiagnosticRetentionDays);
+    }
+
+    [Fact]
     public async Task MigrationFromSchemaV2PreservesExistingRowsAndUsesDisabledRetentionDefault()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -500,6 +574,68 @@ public sealed class DiagnosticPrivacyRetentionTests
         var settings = await new SqliteUserSettingsRepository(context).GetAsync();
         Assert.False(settings.SaveDiagnosticHistory);
         Assert.Equal(90, settings.DiagnosticRetentionDays);
+    }
+
+    private static async Task<int> ReadDatabaseVersionAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version;";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static async Task<string[]> ReadColumnNamesAsync(SqliteConnection connection, string tableName)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_info(\"{tableName}\");";
+        await using var reader = await command.ExecuteReaderAsync();
+        var columnNames = new List<string>();
+        while (await reader.ReadAsync())
+            columnNames.Add(reader.GetString(1));
+        return columnNames.ToArray();
+    }
+
+    private static async Task<string[]> ReadMigrationSchemaObjectsAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT "type" || ':' || "name"
+            FROM "sqlite_master"
+            WHERE "name" IN (
+                'KnowledgeRules',
+                'IX_KnowledgeRules_RuleId_RuleVersion',
+                'KnowledgeBaseVersions',
+                'RepairHistory',
+                'IX_RepairHistory_CompletedAtUnixMilliseconds')
+            ORDER BY "type", "name";
+            """;
+        await using var reader = await command.ExecuteReaderAsync();
+        var objects = new List<string>();
+        while (await reader.ReadAsync())
+            objects.Add(reader.GetString(0));
+        return objects.ToArray();
+    }
+
+    private static async Task AssertLegacyDiagnosticRunAsync(
+        SqliteConnection connection,
+        string expectedId,
+        long expectedCompletedAt,
+        string expectedPayload)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT \"Id\", \"CompletedAtUnixMilliseconds\", \"PayloadJson\" FROM \"DiagnosticRuns\";";
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(expectedId, reader.GetString(0));
+        Assert.Equal(expectedCompletedAt, reader.GetInt64(1));
+        Assert.Equal(expectedPayload, reader.GetString(2));
+        Assert.False(await reader.ReadAsync());
+    }
+
+    private static async Task<int> ReadSaveDiagnosticHistoryAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT \"SaveDiagnosticHistory\" FROM \"UserSettings\" WHERE \"Id\" = 1;";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     private static DiagnosticRun BuildRun(DateTimeOffset completedAt, ComputerInventory inventory, DiagnosticResult? result = null)
