@@ -1,0 +1,135 @@
+{
+  "schemaVersion": "1.4",
+  "version": "microsoft-windows-pilot-2026-10-04-v6",
+  "source": "Curadoria Microsoft, schema 1.4 com alvo OS/build para 0x80073712. Publisher e URLs sem autenticação criptográfica.",
+  "rules": [
+    {
+      "id": "microsoft.windows-update.0x80073712",
+      "version": 2,
+      "domain": "Windows Update / Component Store",
+      "title": "Integridade do component store (0x80073712)",
+      "impact": "moderate",
+      "errorCodes": [],
+      "symptoms": [],
+      "causes": [],
+      "solutions": [],
+      "references": [
+        {
+          "title": "Get help with Windows upgrade and installation errors",
+          "url": "https://support.microsoft.com/en-us/windows/deployment/install-upgrade/get-help-with-windows-upgrade-and-installation-errors"
+        },
+        {
+          "title": "Fix Windows Update errors",
+          "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/fix-windows-update-errors"
+        },
+        {
+          "title": "Windows 10 release information (build 10240 / version 1507)",
+          "url": "https://learn.microsoft.com/en-us/windows/release-health/release-information"
+        },
+        {
+          "title": "Win32_OperatingSystem.ProductType",
+          "url": "https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem"
+        }
+      ],
+      "applicability": "Somente Windows Client (Win32_OperatingSystem.ProductType=1), no contexto de Windows Update/servicing, com build mínimo inclusivo 10240 (Windows 10 1507), e não há build máximo declarado. O alvo estruturado não infere uma versão máxima.",
+      "match": {
+        "exactErrorCode": "0x80073712",
+        "scannerNames": [
+          "Windows Update"
+        ],
+        "requiredContextTerms": [],
+        "requiredSourceProviders": [
+          "WindowsUpdateClient"
+        ]
+      },
+      "requiredEvidence": [
+        "Código literal 0x80073712 no achado",
+        "Provider estruturado WindowsUpdateClient no mesmo achado"
+      ],
+      "procedure": {
+        "diagnosticAction": "Confirme o código exato e o provider estruturado WindowsUpdateClient no mesmo achado. Se a etapa DISM falhar, preserve e inspecione CBS.log.",
+        "correctiveAction": "Ação manual, elevada e modificadora: siga o procedimento DISM documentado pela Microsoft. Execute System File Checker (SFC) somente se DISM concluir com sucesso. Se DISM falhar, não prossiga para SFC. Preserve e inspecione CBS.log.",
+        "requiredPrivilege": "Elevação administrativa para o procedimento DISM, conforme a documentação Microsoft. Este pacote contém apenas orientação, sem comandos executáveis.",
+        "requiresElevation": true,
+        "risk": "Ação privilegiada e modificadora do sistema. As páginas não quantificam risco, duração ou resultado.",
+        "backup": "As páginas não especificam etapa de backup. Antes da ação modificadora, siga a política de recuperação adequada ao ambiente.",
+        "rollback": "Indisponível: as páginas citadas não documentam rollback para DISM/SFC.",
+        "sourceLimitation": "A página Learn identifica 0x80073712 como ERROR_SXS_COMPONENT_STORE_CORRUPT e prescreve DISM, seguido de SFC somente após sucesso. O artigo Learn é destinado a suporte e profissionais de TI. A página Support também descreve arquivo do Windows Update possivelmente danificado/ausente. As fontes não nomeiam arquivos específicos nem garantem reparo ou rollback.",
+        "isModifying": true,
+        "requiresUserConfirmation": true,
+        "manualOnly": true
+      },
+      "osTarget": {
+        "families": [
+          "WindowsClient"
+        ],
+        "minimumBuild": 10240,
+        "maximumBuild": null
+      }
+    },
+    {
+      "id": "microsoft.windows-update.0x80073712.server",
+      "version": 2,
+      "domain": "Windows Update / Component Store",
+      "title": "Integridade do component store (0x80073712)",
+      "impact": "moderate",
+      "errorCodes": [],
+      "symptoms": [],
+      "causes": [],
+      "solutions": [],
+      "references": [
+        {
+          "title": "Get help with Windows upgrade and installation errors",
+          "url": "https://support.microsoft.com/en-us/windows/deployment/install-upgrade/get-help-with-windows-upgrade-and-installation-errors"
+        },
+        {
+          "title": "Fix Windows Update errors",
+          "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/installing-updates-features-roles/fix-windows-update-errors"
+        },
+        {
+          "title": "Windows Server release information (Windows Server 2016, OS build 14393)",
+          "url": "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info"
+        },
+        {
+          "title": "Win32_OperatingSystem.ProductType",
+          "url": "https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem"
+        }
+      ],
+      "applicability": "Somente Windows Server identificado por Win32_OperatingSystem.ProductType=2 (Domain Controller) ou 3 (Server), no contexto de Windows Update/servicing, com build mínimo inclusivo 14393 (Windows Server 2016), e não há build máximo declarado.",
+      "match": {
+        "exactErrorCode": "0x80073712",
+        "scannerNames": [
+          "Windows Update"
+        ],
+        "requiredContextTerms": [],
+        "requiredSourceProviders": [
+          "WindowsUpdateClient"
+        ]
+      },
+      "requiredEvidence": [
+        "Código literal 0x80073712 no achado",
+        "Provider estruturado WindowsUpdateClient no mesmo achado"
+      ],
+      "procedure": {
+        "diagnosticAction": "Confirme o código exato e o provider estruturado WindowsUpdateClient no mesmo achado. Se a etapa DISM falhar, preserve e inspecione CBS.log.",
+        "correctiveAction": "Ação manual, elevada e modificadora: siga o procedimento DISM documentado pela Microsoft. Execute System File Checker (SFC) somente se DISM concluir com sucesso. Se DISM falhar, não prossiga para SFC. Preserve e inspecione CBS.log.",
+        "requiredPrivilege": "Elevação administrativa para o procedimento DISM, conforme a documentação Microsoft. Este pacote contém apenas orientação, sem comandos executáveis.",
+        "requiresElevation": true,
+        "risk": "Ação privilegiada e modificadora do sistema. As páginas não quantificam risco, duração ou resultado.",
+        "backup": "As páginas não especificam etapa de backup. Antes da ação modificadora, siga a política de recuperação adequada ao ambiente.",
+        "rollback": "Indisponível: as páginas citadas não documentam rollback para DISM/SFC.",
+        "sourceLimitation": "A página Learn identifica 0x80073712 como ERROR_SXS_COMPONENT_STORE_CORRUPT e prescreve DISM, seguido de SFC somente após sucesso. O artigo Learn é destinado a suporte e profissionais de TI. A página Support também descreve arquivo do Windows Update possivelmente danificado/ausente. As fontes não nomeiam arquivos específicos nem garantem reparo ou rollback.",
+        "isModifying": true,
+        "requiresUserConfirmation": true,
+        "manualOnly": true
+      },
+      "osTarget": {
+        "families": [
+          "WindowsServer"
+        ],
+        "minimumBuild": 14393,
+        "maximumBuild": null
+      }
+    }
+  ]
+}

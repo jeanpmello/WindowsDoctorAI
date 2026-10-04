@@ -194,6 +194,92 @@ public sealed class OperatingSystemApplicabilityTests
     }
 
     [Fact]
+    public async Task ComplementarySchema14PackageUpdatesOnly80073712AndEngineVerifiesFamilyAndBuild()
+    {
+        var historicalJson = ReadKnowledgePack("microsoft-windows-update-pilot.json");
+        var updateJson = ReadKnowledgePack("microsoft-windows-update-pilot-1.4.json");
+        var historicalPackage = JsonSerializer.Deserialize<KnowledgePackage>(historicalJson, JsonOptions)!;
+        var updatePackage = JsonSerializer.Deserialize<KnowledgePackage>(updateJson, JsonOptions)!;
+        Assert.Equal("1.4", updatePackage.SchemaVersion);
+        Assert.Equal(2, updatePackage.Rules.Count);
+        Assert.All(updatePackage.Rules, rule => Assert.Equal("0x80073712", rule.Match!.ExactErrorCode));
+        Assert.DoesNotContain(updatePackage.Rules,
+            rule => string.Equals(rule.Match?.ExactErrorCode, "0xC1900107", StringComparison.OrdinalIgnoreCase));
+
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context);
+        var repository = new SqliteKnowledgeRepository(context);
+        var importer = new KnowledgeJsonImporter(repository);
+
+        await importer.ImportAsync(historicalJson);
+        var importedUpdate = await importer.ImportAsync(updateJson);
+        var latestRules = await repository.GetLatestRulesAsync();
+        var clientRule = Assert.Single(latestRules, rule => rule.Id == "microsoft.windows-update.0x80073712");
+        var serverRule = Assert.Single(latestRules, rule => rule.Id == "microsoft.windows-update.0x80073712.server");
+        var setupRule = Assert.Single(latestRules, rule => rule.Id == "microsoft.windows-setup.0xc1900107");
+        var historicalUpdate = Assert.Single(historicalPackage.Rules,
+            rule => rule.Id == "microsoft.windows-update.0x80073712");
+
+        Assert.Equal("microsoft-windows-pilot-2026-10-04-v6", importedUpdate.Version);
+        Assert.Equal(2, importedUpdate.ImportedRules);
+        Assert.Equal(2, clientRule.Version);
+        Assert.Equal(2, serverRule.Version);
+        Assert.Equal(1, setupRule.Version);
+        Assert.Equal([KnowledgeOperatingSystemFamily.WindowsClient], clientRule.OsTarget!.Families);
+        Assert.Equal(10240, clientRule.OsTarget.MinimumBuild);
+        Assert.Null(clientRule.OsTarget.MaximumBuild);
+        Assert.Equal([KnowledgeOperatingSystemFamily.WindowsServer], serverRule.OsTarget!.Families);
+        Assert.Equal(14393, serverRule.OsTarget.MinimumBuild);
+        Assert.Null(serverRule.OsTarget.MaximumBuild);
+        Assert.Equal(historicalUpdate.Match!.ExactErrorCode, clientRule.Match!.ExactErrorCode);
+        Assert.Equal(historicalUpdate.Match.ScannerNames, clientRule.Match.ScannerNames);
+        Assert.Equal(historicalUpdate.Match.RequiredSourceProviders, clientRule.Match.RequiredSourceProviders);
+        Assert.Equal(historicalUpdate.RequiredEvidence, clientRule.RequiredEvidence);
+        Assert.Equal(historicalUpdate.Procedure!.DiagnosticAction, clientRule.Procedure!.DiagnosticAction);
+        Assert.Equal(historicalUpdate.Procedure.CorrectiveAction, clientRule.Procedure.CorrectiveAction);
+        Assert.Equal(historicalUpdate.Procedure.RequiredPrivilege, clientRule.Procedure.RequiredPrivilege);
+        Assert.Equal(historicalUpdate.Procedure.RequiresElevation, clientRule.Procedure.RequiresElevation);
+        Assert.Equal(historicalUpdate.Procedure.Risk, clientRule.Procedure.Risk);
+        Assert.Equal(historicalUpdate.Procedure.Backup, clientRule.Procedure.Backup);
+        Assert.Equal(historicalUpdate.Procedure.Rollback, clientRule.Procedure.Rollback);
+        Assert.Equal(historicalUpdate.Procedure.SourceLimitation, clientRule.Procedure.SourceLimitation);
+        Assert.True(clientRule.Procedure.ManualOnly);
+        Assert.True(clientRule.Procedure.RequiresUserConfirmation);
+        Assert.Equal(clientRule.Match.ExactErrorCode, serverRule.Match!.ExactErrorCode);
+        Assert.Equal(clientRule.Match.RequiredSourceProviders, serverRule.Match.RequiredSourceProviders);
+        Assert.Equal(clientRule.RequiredEvidence, serverRule.RequiredEvidence);
+        Assert.Equal(clientRule.Procedure.CorrectiveAction, serverRule.Procedure!.CorrectiveAction);
+        Assert.True(serverRule.Procedure.ManualOnly);
+        Assert.True(serverRule.Procedure.RequiresUserConfirmation);
+        Assert.Equal(3, latestRules.Count);
+        Assert.Equal(4, await context.KnowledgeRules.CountAsync());
+        Assert.Equal(2, await context.KnowledgeBaseVersions.CountAsync());
+
+        var engine = new RecommendationEngine();
+        var provider = DiagnosticSourceMetadata.FromEventProvider("Microsoft-Windows-WindowsUpdateClient");
+        var report = Error80073712Report(provider);
+        Assert.Equal(clientRule.Id, Assert.Single(engine.Recommend(report, [clientRule, serverRule],
+            Inventory(OperatingSystemProductType.Workstation, "10240"))).RuleId);
+        Assert.Empty(engine.Recommend(report, [clientRule, serverRule],
+            Inventory(OperatingSystemProductType.Workstation, "10239")));
+        Assert.Equal(clientRule.Id, Assert.Single(engine.Recommend(report, [clientRule, serverRule],
+            Inventory(OperatingSystemProductType.Workstation, "22621"))).RuleId);
+        Assert.Empty(engine.Recommend(report, [clientRule, serverRule],
+            Inventory(OperatingSystemProductType.Server, "14392")));
+        Assert.Equal(serverRule.Id, Assert.Single(engine.Recommend(report, [clientRule, serverRule],
+            Inventory(OperatingSystemProductType.Server, "14393"))).RuleId);
+        Assert.Equal(serverRule.Id, Assert.Single(engine.Recommend(report, [clientRule, serverRule],
+            Inventory(OperatingSystemProductType.DomainController, "14393"))).RuleId);
+        Assert.Equal(serverRule.Id, Assert.Single(engine.Recommend(report, [clientRule, serverRule],
+            Inventory(OperatingSystemProductType.Server, "20348"))).RuleId);
+        Assert.Empty(engine.Recommend(report, [clientRule, serverRule], Inventory(null, "22621")));
+    }
+
+    [Fact]
     public async Task AssessmentUsesRedactedRunInventoryAndReportDistinguishesVerifiedTargetFromLegacy()
     {
         var targetRule = Rule("targeted", Target([KnowledgeOperatingSystemFamily.WindowsClient], 22000, 23000));
@@ -270,6 +356,15 @@ public sealed class OperatingSystemApplicabilityTests
 
     private static string CreatePackage(string schema, params KnowledgeRule[] rules) =>
         JsonSerializer.Serialize(new KnowledgePackage(schema, "fixture-v1", "fixture local", rules), JsonOptions);
+
+    private static string ReadKnowledgePack(string fileName) =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "knowledge-packs", fileName));
+
+    private static DiagnosticReport Error80073712Report(DiagnosticSourceMetadata? sourceMetadata) => new(
+        [new DiagnosticResult("Windows Update", "Windows Update", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
+            "Falha no Windows Update", "0x80073712", "Nenhuma ação executada.", "0x80073712",
+            TimeSpan.Zero, DateTimeOffset.UtcNow) { SourceMetadata = sourceMetadata }],
+        DateTimeOffset.UtcNow.AddSeconds(-1), DateTimeOffset.UtcNow, TimeSpan.FromSeconds(1), new HealthScore(80));
 
     private static ComputerInventory Inventory(OperatingSystemProductType? productType, string? build) =>
         new() { OperatingSystem = new OperatingSystemDetails { ProductType = productType, Build = build } };

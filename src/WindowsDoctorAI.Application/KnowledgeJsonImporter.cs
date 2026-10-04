@@ -124,9 +124,7 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
             {
                 if (reference is null) throw new InvalidDataException($"Referência vazia na regra {rule.Id}.");
                 ValidateText(reference.Title, "reference.title", 200);
-                ValidateText(reference.Url, "reference.url", 2048);
-                if (!Uri.TryCreate(reference.Url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(uri.Host))
-                    throw new InvalidDataException($"A referência da regra {rule.Id} deve ser uma URL HTTPS absoluta.");
+                ValidateReferenceUrl(reference.Url, rule.Id);
             }
 
             if (strictSchema)
@@ -236,6 +234,20 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         if (values is null || values.Count > maximumCount)
             throw new InvalidDataException($"{field} da regra {ruleId} excede o limite de {maximumCount} itens.");
         foreach (var value in values) ValidateText(value, $"{field} ({ruleId})", maximumLength);
+    }
+
+    private static void ValidateReferenceUrl(string? value, string ruleId)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 2048 || value.Any(char.IsControl)
+            || !string.Equals(value, value.Trim(), StringComparison.Ordinal)
+            || !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || !uri.IsWellFormedOriginalString()
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(uri.Host)
+            || uri.HostNameType == UriHostNameType.Unknown
+            || !string.IsNullOrEmpty(uri.UserInfo))
+            throw new InvalidDataException($"A referência da regra {ruleId} deve ser uma URL HTTPS absoluta, bem formada e com host válido.");
     }
 
     private static void ValidateText(string? value, string field, int maximumLength)

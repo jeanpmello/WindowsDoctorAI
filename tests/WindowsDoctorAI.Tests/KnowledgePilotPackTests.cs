@@ -54,6 +54,42 @@ public sealed class KnowledgePilotPackTests
     }
 
     [Fact]
+    public void HttpsReferencesAcceptOfficialMicrosoftUriWithoutTreatingItsPathAsLocal()
+    {
+        const string officialUrl = "https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem";
+        var json = CreateLegacyPackage(1).Replace("https://example.invalid/docs", officialUrl, StringComparison.Ordinal);
+
+        Assert.Equal(1, new KnowledgeJsonImporter(new InMemoryKnowledgeRepository()).Preview(json).RuleCount);
+    }
+
+    [Fact]
+    public void HttpsReferenceLengthLimitRemainsEnforced()
+    {
+        var overlongUrl = "https://example.invalid/" + new string('a', 2048);
+        var json = CreateLegacyPackage(1).Replace("\"https://example.invalid/docs\"", JsonSerializer.Serialize(overlongUrl), StringComparison.Ordinal);
+
+        Assert.Throws<InvalidDataException>(() => new KnowledgeJsonImporter(new InMemoryKnowledgeRepository()).Preview(json));
+    }
+
+    [Theory]
+    [InlineData("http://example.invalid/docs")]
+    [InlineData("file:///etc/passwd")]
+    [InlineData("/etc/passwd")]
+    [InlineData("https:/example.invalid/docs")]
+    [InlineData("https:///docs")]
+    [InlineData("https://")]
+    [InlineData("https://user@example.invalid/docs")]
+    [InlineData("https://example.invalid:bad/docs")]
+    [InlineData("https://example.invalid/a b")]
+    [InlineData("https://example.invalid/a\tb")]
+    public void HttpsReferencesRejectInvalidSchemesAuthoritiesAndText(string url)
+    {
+        var json = CreateLegacyPackage(1).Replace("\"https://example.invalid/docs\"", JsonSerializer.Serialize(url), StringComparison.Ordinal);
+
+        Assert.Throws<InvalidDataException>(() => new KnowledgeJsonImporter(new InMemoryKnowledgeRepository()).Preview(json));
+    }
+
+    [Fact]
     public void StrictSchemaRejectsGenericConditionsCommandsScriptsAndMalformedCodes()
     {
         var importer = new KnowledgeJsonImporter(new InMemoryKnowledgeRepository());
