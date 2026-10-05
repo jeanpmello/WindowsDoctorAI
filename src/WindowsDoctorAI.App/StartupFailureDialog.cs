@@ -10,12 +10,8 @@ internal static class StartupFailureDialog
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern int MessageBoxW(IntPtr windowHandle, string text, string caption, uint type);
 
-    public static void Show(int hresult)
+    public static void Show(StartupFailureDetails details)
     {
-        var message = string.Format(
-            "O Windows Doctor AI não conseguiu concluir a inicialização.\r\n\r\nCódigo técnico: 0x{0:X8}\r\n\r\nNenhuma varredura de diagnóstico foi iniciada. Consulte README-ALPHA.md e informe apenas esse código ao relatar o problema. Não envie dumps ou dados pessoais.",
-            unchecked((uint)hresult));
-
-        _ = MessageBoxW(IntPtr.Zero, message, "Windows Doctor AI", ErrorIcon);
+        _ = MessageBoxW(IntPtr.Zero, details.ToDisplayText(), "Windows Doctor AI", ErrorIcon);
     }
 }

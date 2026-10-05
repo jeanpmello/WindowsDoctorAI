@@ -22,7 +22,7 @@ internal static class AppEntryPoint
         }
         catch (Exception exception)
         {
-            StartupFailureDialog.Show(exception.HResult);
+            StartupFailureDialog.Show(StartupFailureDetails.ForAppEntryPoint(exception));
             Environment.ExitCode = 1;
         }
     }

@@ -24,6 +24,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/WindowsDoctorAI.App/HomeViewModel.cs" Link="App/HomeViewModel.cs" />
+    <Compile Include="../../src/WindowsDoctorAI.App/StartupFailureDetails.cs" Link="App/StartupFailureDetails.cs" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
   <ItemGroup>

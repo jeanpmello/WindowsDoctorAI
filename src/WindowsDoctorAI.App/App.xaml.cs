@@ -91,8 +91,13 @@ public partial class App : global::Microsoft.UI.Xaml.Application
         }
         catch (Exception exception)
         {
-            _host?.Services.GetService<ILogger<App>>()?.LogCritical("A inicialização do Windows Doctor AI falhou; detalhes omitidos por privacidade.");
-            StartupFailureDialog.Show(exception.HResult);
+            var details = StartupFailureDetails.ForOnLaunched(exception);
+            _host?.Services.GetService<ILogger<App>>()?.LogCritical(
+                "A inicialização do Windows Doctor AI falhou; estágio: {StartupStage}; tipo de exceção: {ExceptionType}; HRESULT: {HResultCode}.",
+                details.Stage,
+                details.ExceptionType,
+                details.HResultCode);
+            StartupFailureDialog.Show(details);
             Environment.Exit(1);
         }
     }
