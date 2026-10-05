@@ -26,6 +26,7 @@ echo O launcher interrompeu a inicializacao antes de abrir o aplicativo.
 echo Este launcher nao baixa, instala nem altera componentes do Windows.
 echo Consulte a pagina oficial da Microsoft:
 echo https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
+pause
 exit /b 2
 
 :app_failed

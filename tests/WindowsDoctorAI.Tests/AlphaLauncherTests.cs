@@ -22,6 +22,30 @@ public sealed class AlphaLauncherTests
     }
 
     [Fact]
+    public void MissingVcBranchShowsOfficialLinkPausesAndReturnsExitCodeTwo()
+    {
+        var launcher = ReadFixture("Start-WindowsDoctorAI.cmd");
+        var lines = launcher.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var missingVcLabel = Array.FindIndex(lines, line =>
+            string.Equals(line.Trim(), ":missing_vc", StringComparison.OrdinalIgnoreCase));
+        Assert.True(missingVcLabel >= 0, "O launcher deve ter a ramificacao :missing_vc.");
+
+        var nextLabel = Array.FindIndex(lines, missingVcLabel + 1, line => line.TrimStart().StartsWith(':'));
+        Assert.True(nextLabel > missingVcLabel, "A ramificacao :missing_vc deve terminar no proximo label.");
+
+        var branchLines = lines[(missingVcLabel + 1)..nextLabel];
+        var branch = string.Join("\n", branchLines);
+        var pauseIndex = Array.FindIndex(branchLines, line =>
+            string.Equals(line.Trim(), "pause", StringComparison.OrdinalIgnoreCase));
+        var returnIndex = Array.FindIndex(branchLines, line =>
+            string.Equals(line.Trim(), "exit /b 2", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Contains("learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist", branch, StringComparison.Ordinal);
+        Assert.True(pauseIndex >= 0, "A ramificacao :missing_vc deve pausar antes de retornar.");
+        Assert.True(returnIndex > pauseIndex, "A pausa deve ocorrer antes do retorno com exit code 2.");
+    }
+
+    [Fact]
     public void LauncherDoesNotDownloadInstallOrElevate()
     {
         var launcher = ReadFixture("Start-WindowsDoctorAI.cmd");
