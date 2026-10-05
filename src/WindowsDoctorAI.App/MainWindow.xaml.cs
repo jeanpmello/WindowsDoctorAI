@@ -21,13 +21,13 @@ public sealed partial class MainWindow : Window
         _navigationService.Navigated += NavigationService_Navigated;
         Closed += MainWindow_Closed;
         StartupFailureContext.SetStage(StartupFailureStage.MainWindowNavigation);
-        RootNavigation.SelectedItem = RootNavigation.MenuItems[0];
         _navigationService.NavigateTo("home");
     }
 
-    private void RootNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    private void NavigationButton_Click(object sender, RoutedEventArgs args)
     {
-        if (args.SelectedItemContainer?.Tag is string route) _navigationService.NavigateTo(route);
+        if (sender is Button button && button.Tag is string route)
+            _navigationService.NavigateTo(route);
     }
 
     private void NavigationService_Navigated(object? sender, string route)
