@@ -62,6 +62,8 @@ public interface IUserSettingsRepository
 public interface IKnowledgeRepository
 {
     Task<IReadOnlyList<KnowledgeRule>> GetLatestRulesAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<KnowledgeRuleProvenance>> GetLatestRuleProvenanceAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<KnowledgeRuleProvenance>>(Array.Empty<KnowledgeRuleProvenance>());
     Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default);
 }
 

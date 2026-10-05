@@ -74,6 +74,8 @@ internal partial class HomeViewModel(
     [ObservableProperty] private IReadOnlyList<BackupSetCatalogDisplayItem> _backupSetCatalogEntries = Array.Empty<BackupSetCatalogDisplayItem>();
     [ObservableProperty] private IReadOnlyList<RepairProposalDisplayItem> _repairProposals = Array.Empty<RepairProposalDisplayItem>();
     [ObservableProperty] private string _repairProposalStatus = "Nenhum plano tipado disponível nesta sessão.";
+    [ObservableProperty] private string _manualGuidanceStatus = "Nenhuma execução diagnóstica carregada para avaliar orientações manuais.";
+    [ObservableProperty] private IReadOnlyList<ManualGuidanceFinding> _manualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
 
     private string? _pendingPackageJson;
     private DiagnosticRun? _currentRun;
@@ -305,6 +307,29 @@ internal partial class HomeViewModel(
         }
     }
 
+    private async Task RefreshManualGuidanceAsync(DiagnosticRun? run, CancellationToken cancellationToken = default)
+    {
+        ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
+        if (run is null)
+        {
+            ManualGuidanceStatus = "Nenhuma execução diagnóstica carregada para avaliar orientações manuais.";
+            return;
+        }
+
+        try
+        {
+            var assessment = await assessmentService.CreateManualGuidanceAssessmentAsync(run, cancellationToken).ConfigureAwait(true);
+            ManualGuidanceStatus = assessment.StatusText;
+            ManualGuidanceFindings = assessment.Findings;
+        }
+        catch (Exception)
+        {
+            ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
+            ManualGuidanceStatus = "Avaliação incompleta: não foi possível verificar regras ou evidência; nenhuma conclusão sobre a condição do sistema é possível.";
+            logger.LogWarning("A avaliação temporária de orientações manuais falhou; detalhes omitidos por privacidade.");
+        }
+    }
+
     public async Task<string?> CreateCurrentHtmlReportAsync(CancellationToken cancellationToken = default)
     {
         if (_currentRun is null)
@@ -385,6 +410,8 @@ internal partial class HomeViewModel(
     {
         RepairProposals = Array.Empty<RepairProposalDisplayItem>();
         RepairProposalStatus = "Planos anteriores invalidados; aguardando um novo diagnóstico.";
+        ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
+        ManualGuidanceStatus = "Aguardando nova avaliação de orientações manuais; dados da execução anterior foram removidos desta seção.";
         ResetCbsLogAnalysis("A observação CBS é independente do diagnóstico e não será associada a evento algum.");
         UpdateCbsLogCommandState();
         IsScanning = true;
@@ -393,6 +420,7 @@ internal partial class HomeViewModel(
         {
             var outcome = await runDiagnostic.ExecuteAsync();
             _currentRun = outcome.Run;
+            await RefreshManualGuidanceAsync(outcome.Run);
             await RefreshRepairProposalsAsync(outcome.Run);
             UpdateCbsLogCommandState();
             CanExportHtmlReport = true;
@@ -406,6 +434,8 @@ internal partial class HomeViewModel(
         catch (Exception exception)
         {
             logger.LogError("A execução do diagnóstico falhou; detalhes omitidos por privacidade.");
+            ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
+            ManualGuidanceStatus = "Avaliação incompleta: a nova execução diagnóstica falhou. Nenhuma conclusão sobre a condição do computador foi produzida.";
             StatusMessage = DiagnosticPrivacyMessages.DiagnosticFailure(exception);
         }
         finally
@@ -421,6 +451,8 @@ internal partial class HomeViewModel(
         StatusMessage = "Carregando histórico local...";
         LastDiagnosticText = "Carregando histórico local...";
         FindingsSummary = "Carregando resultados do histórico local...";
+        ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
+        ManualGuidanceStatus = "Carregando orientações manuais da execução local...";
         RepairProposals = Array.Empty<RepairProposalDisplayItem>();
         RepairProposalStatus = "Carregando evidência atual; planos antigos estão indisponíveis.";
         try
@@ -432,6 +464,7 @@ internal partial class HomeViewModel(
             if (latest is null)
             {
                 _currentRun = null;
+                ManualGuidanceStatus = "Nenhuma execução diagnóstica carregada para avaliar orientações manuais.";
                 RepairProposalStatus = "Nenhum plano disponível: não há uma execução diagnóstica atual salva para revalidar.";
                 LastDiagnosticText = "Nenhum diagnóstico anterior encontrado no histórico local.";
                 FindingsSummary = "Nenhum resultado anterior está disponível no histórico local.";
@@ -439,6 +472,7 @@ internal partial class HomeViewModel(
                 return;
             }
             _currentRun = latest;
+            await RefreshManualGuidanceAsync(latest, cancellationToken);
             await RefreshRepairProposalsAsync(latest, cancellationToken);
             CanExportHtmlReport = true;
             DisplayInventory(latest.Inventory);
@@ -453,6 +487,8 @@ internal partial class HomeViewModel(
             logger.LogWarning("O último diagnóstico não pôde ser carregado do histórico local; detalhes omitidos por privacidade.");
             LastDiagnosticText = "Histórico local indisponível.";
             FindingsSummary = "Não foi possível carregar resultados do histórico local.";
+            ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
+            ManualGuidanceStatus = "Avaliação incompleta: o histórico local está indisponível; nenhuma conclusão sobre a condição do sistema é possível.";
             StatusMessage = DiagnosticPrivacyMessages.HistoryLoadFailure(exception);
         }
         finally

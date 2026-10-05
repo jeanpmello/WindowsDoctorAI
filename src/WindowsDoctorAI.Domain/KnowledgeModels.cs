@@ -116,6 +116,14 @@ public sealed record KnowledgePackage(
     string Source,
     IReadOnlyList<KnowledgeRule> Rules);
 
+/// <summary>Metadados declarados do pacote que forneceu uma regra; não autenticam origem ou conteúdo.</summary>
+public sealed record KnowledgeRuleProvenance(
+    string RuleId,
+    int RuleVersion,
+    string PackageVersion,
+    string DeclaredSource,
+    string Sha256);
+
 public sealed record RecommendationEvidence(
     string ScannerName,
     string Category,

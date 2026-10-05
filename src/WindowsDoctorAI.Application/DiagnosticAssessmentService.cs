@@ -24,4 +24,19 @@ public sealed class DiagnosticAssessmentService(
             : rootCauseAnalyzer.Analyze(run.Report);
         return htmlFormatter.Format(run, recommendations, analysis, rules.Count);
     }
+
+    /// <summary>Cria uma projeção temporária por achado; não grava evidência nem encaminha orientações ao fluxo de reparo.</summary>
+    public async Task<ManualGuidanceAssessment> CreateManualGuidanceAssessmentAsync(
+        DiagnosticRun run,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        var safeRun = DiagnosticPrivacyRedactor.Redact(run);
+        var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(false);
+        var provenance = await knowledgeRepository.GetLatestRuleProvenanceAsync(cancellationToken).ConfigureAwait(false);
+        var findings = safeRun.Report is null
+            ? Array.Empty<ManualRecommendationFindingAssessment>()
+            : recommendationEngine.AssessManualFindings(safeRun.Report, rules, safeRun.Inventory);
+        return ManualGuidanceProjector.Project(run, rules, provenance, findings);
+    }
 }

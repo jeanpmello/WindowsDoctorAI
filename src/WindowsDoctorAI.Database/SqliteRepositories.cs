@@ -147,6 +147,31 @@ public sealed class SqliteKnowledgeRepository(WindowsDoctorDbContext dbContext) 
             .ToArray();
     }
 
+    public async Task<IReadOnlyList<KnowledgeRuleProvenance>> GetLatestRuleProvenanceAsync(CancellationToken cancellationToken = default)
+    {
+        var ruleEntities = await dbContext.KnowledgeRules.AsNoTracking().ToListAsync(cancellationToken).ConfigureAwait(false);
+        var latestRules = ruleEntities
+            .GroupBy(entity => entity.RuleId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(entity => entity.RuleVersion).First())
+            .ToArray();
+        if (latestRules.Length == 0) return Array.Empty<KnowledgeRuleProvenance>();
+
+        var packageVersions = latestRules.Select(entity => entity.PackageVersion).Distinct(StringComparer.Ordinal).ToArray();
+        var packages = await dbContext.KnowledgeBaseVersions.AsNoTracking()
+            .Where(package => packageVersions.Contains(package.Version))
+            .ToDictionaryAsync(package => package.Version, StringComparer.Ordinal, cancellationToken)
+            .ConfigureAwait(false);
+        return latestRules
+            .Where(rule => packages.ContainsKey(rule.PackageVersion))
+            .Select(rule =>
+            {
+                var package = packages[rule.PackageVersion];
+                return new KnowledgeRuleProvenance(rule.RuleId, rule.RuleVersion, package.Version, package.Source, package.Sha256);
+            })
+            .OrderBy(item => item.RuleId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     public async Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(package);
