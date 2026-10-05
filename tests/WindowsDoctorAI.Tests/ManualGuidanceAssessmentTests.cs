@@ -371,6 +371,41 @@ public sealed class ManualGuidanceAssessmentTests
     }
 
     [Fact]
+    public async Task SqliteProvenanceKeepsRulePackageLinksAcrossIncrementalImports()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+        await context.Database.EnsureCreatedAsync();
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context);
+        var repository = new SqliteKnowledgeRepository(context);
+        var historicalJson = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "knowledge-packs/microsoft-windows-update-pilot.json"));
+        var updateJson = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "knowledge-packs/microsoft-windows-update-pilot-1.4.json"));
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) }
+        };
+        var historicalPackage = JsonSerializer.Deserialize<KnowledgePackage>(historicalJson, jsonOptions)!;
+        var updatePackage = JsonSerializer.Deserialize<KnowledgePackage>(updateJson, jsonOptions)!;
+        var importer = new KnowledgeJsonImporter(repository);
+
+        var historicalImport = await importer.ImportAsync(historicalJson);
+        var updateImport = await importer.ImportAsync(updateJson);
+        var provenance = await repository.GetLatestRuleProvenanceAsync();
+
+        var updatedRule = Assert.Single(provenance, item => item.RuleId == "microsoft.windows-update.0x80073712");
+        Assert.Equal(updatePackage.Version, updatedRule.PackageVersion);
+        Assert.Equal(updatePackage.Source, updatedRule.DeclaredSource);
+        Assert.Equal(updateImport.Sha256, updatedRule.Sha256);
+
+        var historicalRule = Assert.Single(provenance, item => item.RuleId == "microsoft.windows-setup.0xc1900107");
+        Assert.Equal(historicalPackage.Version, historicalRule.PackageVersion);
+        Assert.Equal(historicalPackage.Source, historicalRule.DeclaredSource);
+        Assert.Equal(historicalImport.Sha256, historicalRule.Sha256);
+    }
+
+    [Fact]
     public async Task MissingDiagnosticReportIsShownAsIncomplete()
     {
         var run = CreateRun(report: null);

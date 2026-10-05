@@ -156,11 +156,13 @@ public sealed class SqliteKnowledgeRepository(WindowsDoctorDbContext dbContext) 
             .ToArray();
         if (latestRules.Length == 0) return Array.Empty<KnowledgeRuleProvenance>();
 
-        var packageVersions = latestRules.Select(entity => entity.PackageVersion).Distinct(StringComparer.Ordinal).ToArray();
-        var packages = await dbContext.KnowledgeBaseVersions.AsNoTracking()
+        var packageVersions = latestRules.Select(entity => entity.PackageVersion).Distinct(StringComparer.Ordinal).ToList();
+        var packageMetadata = await dbContext.KnowledgeBaseVersions.AsNoTracking()
             .Where(package => packageVersions.Contains(package.Version))
-            .ToDictionaryAsync(package => package.Version, StringComparer.Ordinal, cancellationToken)
+            .Select(package => new { package.Version, package.Source, package.Sha256 })
+            .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
+        var packages = packageMetadata.ToDictionary(package => package.Version, StringComparer.Ordinal);
         return latestRules
             .Where(rule => packages.ContainsKey(rule.PackageVersion))
             .Select(rule =>
