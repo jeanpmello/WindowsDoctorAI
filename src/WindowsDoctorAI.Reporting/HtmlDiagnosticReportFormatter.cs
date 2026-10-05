@@ -175,7 +175,7 @@ public sealed class HtmlDiagnosticReportFormatter
                 builder.Append("<p>").Append(S(recommendation.DeclaredPackageSourceText, sourceInventory)).AppendLine("</p>");
                 builder.Append("<p>").Append(S(recommendation.PackageVersionText, sourceInventory)).AppendLine("</p>");
                 builder.Append("<p>").Append(S(recommendation.PackageSha256Text, sourceInventory)).AppendLine("</p>");
-                builder.Append("<p><strong>Ação diagnóstica declarada (não executada):</strong> ").Append(S(recommendation.DiagnosticAction, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Ação diagnóstica (não executada):</strong> ").Append(S(recommendation.DiagnosticAction, sourceInventory)).AppendLine("</p>");
                 builder.Append("<p><strong>Orientação corretiva (não executada):</strong> ").Append(S(recommendation.CorrectiveAction, sourceInventory)).AppendLine("</p>");
                 builder.Append("<p><strong>").Append(S(recommendation.SolutionsDisclosureText, sourceInventory)).AppendLine("</strong></p>");
                 if (recommendation.Solutions.Count > 0)

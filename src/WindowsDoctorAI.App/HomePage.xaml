@@ -174,7 +174,7 @@
                                                             <TextBlock Text="{Binding DeclaredPackageSourceText}" Style="{StaticResource FieldValueStyle}" />
                                                             <TextBlock Text="{Binding PackageVersionText}" Style="{StaticResource FieldValueStyle}" />
                                                             <TextBlock Text="{Binding PackageSha256Text}" Style="{StaticResource FieldValueStyle}" />
-                                                            <TextBlock Text="Ação diagnóstica declarada" Style="{StaticResource FieldLabelStyle}" />
+                                                            <TextBlock Text="Ação diagnóstica (não executada)" Style="{StaticResource FieldLabelStyle}" />
                                                             <TextBlock Text="{Binding DiagnosticAction}" Style="{StaticResource FieldValueStyle}" />
                                                             <TextBlock Text="Orientação corretiva para revisão humana (não executada)" Style="{StaticResource FieldLabelStyle}" />
                                                             <TextBlock Text="{Binding CorrectiveAction}" Style="{StaticResource FieldValueStyle}" />

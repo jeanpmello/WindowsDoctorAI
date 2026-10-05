@@ -316,11 +316,18 @@ public sealed class ManualGuidanceAssessmentTests
     [Fact]
     public async Task DuplicateRedactedFindingsHaveStableRunScopedIdentityAndNoActionableGuidance()
     {
-        var rule = CreateManualRule("fixture.duplicate") with { Solutions = ["Não aplicar sem distinguir os achados."] };
+        const string diagnosticInstruction = "AÇÃO-DIAGNÓSTICA-EXCLUSIVA-NÃO-EXIBIR";
+        var initialRule = CreateManualRule("fixture.duplicate");
+        var rule = initialRule with
+        {
+            Solutions = ["Não aplicar sem distinguir os achados."],
+            Procedure = initialRule.Procedure! with { DiagnosticAction = diagnosticInstruction }
+        };
         var run = CreateRun(CreateReport(
             CreateFinding($"Falha {ErrorCode}; password=alpha-secret"),
             CreateFinding($"Falha {ErrorCode}; password=beta-secret")));
-        var service = CreateAssessmentService(new FakeKnowledgeRepository([rule]));
+        var repository = new FakeKnowledgeRepository([rule]);
+        var service = CreateAssessmentService(repository);
 
         var assessment = await service.CreateManualGuidanceAssessmentAsync(run);
         var repeatedAssessment = await service.CreateManualGuidanceAssessmentAsync(run);
@@ -328,6 +335,10 @@ public sealed class ManualGuidanceAssessmentTests
         {
             Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         });
+        var home = CreateHomeViewModel(new FakeHistory(run), repository);
+        await home.LoadLatestAsync();
+        var html = await service.CreateHtmlReportAsync(run);
+        var visibleHtml = System.Net.WebUtility.HtmlDecode(html);
 
         Assert.Equal(ManualGuidanceAssessmentStatus.AmbiguousFindings, assessment.Status);
         Assert.Equal(2, assessment.Findings.Count);
@@ -349,8 +360,18 @@ public sealed class ManualGuidanceAssessmentTests
         {
             Assert.Contains("não acionável", recommendation.ManualOnlyStatusText, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Não acionável", recommendation.CorrectiveAction, StringComparison.Ordinal);
+            Assert.Contains("Ação diagnóstica não exibida", recommendation.DiagnosticAction, StringComparison.Ordinal);
+            Assert.DoesNotContain(diagnosticInstruction, recommendation.DiagnosticAction, StringComparison.Ordinal);
             Assert.Empty(recommendation.Solutions);
         });
+        Assert.Equal(2, home.ManualGuidanceFindings.Count);
+        Assert.Contains("ambígua", home.ManualGuidanceStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("não são acionáveis", home.ManualGuidanceStatus, StringComparison.OrdinalIgnoreCase);
+        Assert.All(home.ManualGuidanceFindings.SelectMany(item => item.Recommendations), recommendation =>
+            Assert.DoesNotContain(diagnosticInstruction, recommendation.DiagnosticAction, StringComparison.Ordinal));
+        Assert.DoesNotContain(diagnosticInstruction, visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("ambíguo / não acionável", visibleHtml, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Ação diagnóstica não exibida", visibleHtml, StringComparison.Ordinal);
     }
 
     [Fact]

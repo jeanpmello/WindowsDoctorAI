@@ -233,7 +233,9 @@ public static class ManualGuidanceProjector
             PackageSourceText(provenance, inventory),
             PackageVersionText(provenance, inventory),
             PackageHashText(provenance, inventory),
-            Safe(procedure.DiagnosticAction, inventory),
+            isAmbiguousDuplicate
+                ? "Ação diagnóstica não exibida: a identidade do achado é ambígua e nenhuma instrução pode ser associada com segurança a esta ocorrência."
+                : Safe(procedure.DiagnosticAction, inventory),
             isAmbiguousDuplicate
                 ? "Não acionável: achados indistinguíveis após redação; não associe esta orientação a uma ocorrência individual."
                 : Safe(procedure.CorrectiveAction, inventory),
