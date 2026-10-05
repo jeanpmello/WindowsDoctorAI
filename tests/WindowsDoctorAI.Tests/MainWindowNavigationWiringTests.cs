@@ -77,6 +77,39 @@ public sealed class MainWindowNavigationWiringTests
         Assert.Throws<ArgumentOutOfRangeException>(() => navigation.NavigateTo("unknown"));
     }
 
+    [Fact]
+    public void ReselectingActiveRouteRaisesNoEventAndDoesNotRecreateThePage()
+    {
+        var navigation = new NavigationService();
+        var navigatedRoutes = new List<string>();
+        var pageCreationCount = 0;
+
+        // MainWindow replaces the page from this event, so each event represents one page creation.
+        navigation.Navigated += (_, route) =>
+        {
+            navigatedRoutes.Add(route);
+            pageCreationCount++;
+        };
+
+        navigation.NavigateTo("home");
+        navigation.NavigateTo("home");
+        navigation.NavigateTo("HOME");
+        Assert.Equal(new[] { "home" }, navigatedRoutes);
+        Assert.Equal(1, pageCreationCount);
+
+        navigation.NavigateTo("about");
+        navigation.NavigateTo("about");
+        Assert.Equal(new[] { "home", "about" }, navigatedRoutes);
+        Assert.Equal(2, pageCreationCount);
+
+        navigation.NavigateTo("home");
+        Assert.Equal(new[] { "home", "about", "home" }, navigatedRoutes);
+        Assert.Equal(3, pageCreationCount);
+        navigation.NavigateTo("home");
+        Assert.Equal(new[] { "home", "about", "home" }, navigatedRoutes);
+        Assert.Equal(3, pageCreationCount);
+    }
+
     private static int CountOccurrences(string value, string needle)
     {
         var count = 0;
