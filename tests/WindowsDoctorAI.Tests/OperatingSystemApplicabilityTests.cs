@@ -283,7 +283,22 @@ public sealed class OperatingSystemApplicabilityTests
     public async Task AssessmentUsesRedactedRunInventoryAndReportDistinguishesVerifiedTargetFromLegacy()
     {
         var targetRule = Rule("targeted", Target([KnowledgeOperatingSystemFamily.WindowsClient], 22000, 23000));
-        var legacyRule = LegacyRule("legacy-report") with { Applicability = "Texto legado apenas descritivo." };
+        var legacyRule = LegacyRule("legacy-report") with
+        {
+            Applicability = "Texto legado apenas descritivo.",
+            Procedure = new KnowledgeProcedure(
+                "Revise a evidência.",
+                "Decida manualmente com base na fonte.",
+                "Usuário padrão.",
+                false,
+                "Risco não avaliado.",
+                "Backup conforme política local.",
+                "Rollback não especificado.",
+                "Fonte declarada não verificada.",
+                false,
+                true,
+                true)
+        };
         var now = DateTimeOffset.UtcNow;
         var run = new DiagnosticRun(Guid.NewGuid(), now, now, TimeSpan.Zero,
             Inventory(OperatingSystemProductType.Workstation, "22621"), MatchingReport());
@@ -291,11 +306,12 @@ public sealed class OperatingSystemApplicabilityTests
             new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
 
         var html = await service.CreateHtmlReportAsync(run);
+        var visibleHtml = System.Net.WebUtility.HtmlDecode(html);
 
-        Assert.Contains("Alvo OS+build estruturado verificado", html, StringComparison.Ordinal);
-        Assert.Contains("Regra legada — aplicabilidade não verificada automaticamente", html, StringComparison.Ordinal);
-        Assert.Contains("texto explicativo; não usada como filtro", html, StringComparison.Ordinal);
-        Assert.Contains("não estabelece causa", html, StringComparison.Ordinal);
+        Assert.Contains("Aplicabilidade estruturada verificada", visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("Aplicabilidade legada não verificada", visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("Texto legado apenas descritivo.", visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("verifica apenas elegibilidade", visibleHtml, StringComparison.Ordinal);
         Assert.DoesNotContain("22621", html, StringComparison.Ordinal);
         Assert.DoesNotContain("ProductType", html, StringComparison.Ordinal);
         Assert.Equal(OperatingSystemProductType.Workstation,

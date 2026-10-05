@@ -14,15 +14,12 @@ public sealed class DiagnosticAssessmentService(
     public async Task<string> CreateHtmlReportAsync(DiagnosticRun run, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(run);
-        run = DiagnosticPrivacyRedactor.Redact(run);
-        var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(false);
-        var recommendations = run.Report is null
-            ? Array.Empty<DiagnosticRecommendation>()
-            : recommendationEngine.Recommend(run.Report, rules, run.Inventory);
-        var analysis = run.Report is null
+        var safeRun = DiagnosticPrivacyRedactor.Redact(run);
+        var manualGuidance = await CreateManualGuidanceAssessmentAsync(run, cancellationToken).ConfigureAwait(false);
+        var analysis = safeRun.Report is null
             ? new RootCauseAnalysis("A execução não contém resultados diagnósticos; a causa raiz permanece indeterminada.", Array.Empty<CorrelationObservation>())
-            : rootCauseAnalyzer.Analyze(run.Report);
-        return htmlFormatter.Format(run, recommendations, analysis, rules.Count);
+            : rootCauseAnalyzer.Analyze(safeRun.Report);
+        return htmlFormatter.Format(safeRun, manualGuidance, analysis);
     }
 
     /// <summary>Cria uma projeção temporária por achado; não grava evidência nem encaminha orientações ao fluxo de reparo.</summary>

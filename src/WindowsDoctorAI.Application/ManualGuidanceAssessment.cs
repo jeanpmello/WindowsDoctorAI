@@ -1,26 +1,10 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using WindowsDoctorAI.Domain;
 
 namespace WindowsDoctorAI.Application;
-
-public enum ManualGuidanceAssessmentStatus
-{
-    NoDiagnosticReport,
-    NoFindings,
-    KnowledgeBaseEmpty,
-    NoMatchingRule,
-    GuidanceAvailable,
-    Incomplete
-}
-
-public enum ManualGuidanceFindingStatus
-{
-    NoMatch,
-    SingleCandidate,
-    MultipleCandidates,
-    Incomplete,
-    KnowledgeBaseEmpty
-}
 
 /// <summary>Resultado observacional por achado. Candidatos incompletos nunca são apresentados como match confirmado.</summary>
 public sealed record ManualRecommendationFindingAssessment(
@@ -34,55 +18,6 @@ public sealed record ManualRecommendationIncompleteCandidate(
     KnowledgeRule Rule,
     string Reason,
     bool StructuredApplicabilityVerified);
-
-/// <summary>Modelo temporário de apresentação da Home; nenhum destes dados é persistido pelo projetor.</summary>
-public sealed record ManualGuidanceAssessment(
-    ManualGuidanceAssessmentStatus Status,
-    string StatusText,
-    bool KnowledgeBaseIsEmpty,
-    IReadOnlyList<ManualGuidanceFinding> Findings);
-
-public sealed record ManualGuidanceFinding(
-    string RunReferenceText,
-    string FindingHeading,
-    string EvidenceText,
-    string ProviderText,
-    ManualGuidanceFindingStatus Status,
-    string StatusText,
-    IReadOnlyList<ManualGuidanceRecommendation> Recommendations,
-    IReadOnlyList<ManualGuidanceIncompleteCandidate> IncompleteCandidates);
-
-public sealed record ManualGuidanceRecommendation(
-    string ManualOnlyStatusText,
-    string RuleIdentityText,
-    string Title,
-    string Domain,
-    string MatchStrengthText,
-    string MatchExplanation,
-    string Explanation,
-    string ApplicabilityText,
-    string DeclaredApplicability,
-    string DeclaredPackageSourceText,
-    string PackageVersionText,
-    string PackageSha256Text,
-    string DiagnosticAction,
-    string CorrectiveAction,
-    string Risk,
-    string RequiredPrivilege,
-    string ElevationText,
-    string Backup,
-    string Rollback,
-    string SourceLimitation);
-
-public sealed record ManualGuidanceIncompleteCandidate(
-    string RuleIdentityText,
-    string Title,
-    string MatchStrengthText,
-    string ApplicabilityText,
-    string Reason,
-    string DeclaredPackageSourceText,
-    string PackageVersionText,
-    string PackageSha256Text);
 
 /// <summary>Projeta somente conteúdo redigido e ManualOnly para exibição; não grava achados, candidatos ou evidência.</summary>
 public static class ManualGuidanceProjector
@@ -107,9 +42,21 @@ public static class ManualGuidanceProjector
             item => item,
             RuleProvenanceKeyComparer.Instance);
         var runReference = FormatRunReference(safeRun);
-        var projectedFindings = findings.Select((finding, index) => ProjectFinding(
-            finding,
-            index + 1,
+        var safeFindings = findings.Select(finding =>
+        {
+            var safeFinding = RedactFinding(finding.Finding, redactionInventory);
+            return (Assessment: finding, Finding: safeFinding, Identity: BuildFindingIdentity(run.Id, safeFinding));
+        }).ToArray();
+        var duplicateIdentities = safeFindings
+            .GroupBy(item => item.Identity, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        var projectedFindings = safeFindings.Select(item => ProjectFinding(
+            item.Assessment,
+            item.Finding,
+            item.Identity,
+            duplicateIdentities.Contains(item.Identity),
             runReference,
             rules.Count == 0,
             redactionInventory,
@@ -133,6 +80,21 @@ public static class ManualGuidanceProjector
             return new ManualGuidanceAssessment(
                 ManualGuidanceAssessmentStatus.NoFindings,
                 "Nenhum achado foi produzido nesta execução; isso não exclui problemas nem constitui uma avaliação positiva da condição do computador." + emptyBaseNote,
+                knowledgeBaseIsEmpty,
+                projectedFindings);
+        }
+
+        var ambiguousCount = projectedFindings.Count(item => item.IsAmbiguousDuplicate);
+        if (ambiguousCount > 0)
+        {
+            var incompleteCount = projectedFindings.Sum(item => item.IncompleteCandidates.Count);
+            var notes = new List<string>();
+            if (incompleteCount > 0) notes.Add($"{incompleteCount} candidato(s) também têm evidência/aplicabilidade incompleta.");
+            if (knowledgeBaseIsEmpty) notes.Add("A base de conhecimento está vazia.");
+            var suffix = notes.Count == 0 ? string.Empty : " " + string.Join(" ", notes);
+            return new ManualGuidanceAssessment(
+                ManualGuidanceAssessmentStatus.AmbiguousFindings,
+                $"Identidade ambígua: {ambiguousCount} achado(s) são indistinguíveis após redação. Orientações associadas às duplicatas não são acionáveis.{suffix}",
                 knowledgeBaseIsEmpty,
                 projectedFindings);
         }
@@ -177,18 +139,20 @@ public static class ManualGuidanceProjector
 
     private static ManualGuidanceFinding ProjectFinding(
         ManualRecommendationFindingAssessment finding,
-        int index,
+        DiagnosticResult safeFinding,
+        string findingIdentity,
+        bool isAmbiguousDuplicate,
         string runReference,
         bool knowledgeBaseIsEmpty,
         ComputerInventory inventory,
         IReadOnlyDictionary<(string RuleId, int RuleVersion), KnowledgeRuleProvenance> packageByRule)
     {
-        var safeFinding = DiagnosticPrivacyRedactor.RedactReport(
-            new DiagnosticReport([finding.Finding], finding.Finding.Timestamp, finding.Finding.Timestamp, TimeSpan.Zero, null), inventory)!.Results[0];
         var provider = DiagnosticSourceMetadata.NormalizeProvider(safeFinding.SourceMetadata?.Provider);
-        var candidates = finding.Matches.Select(match => ProjectRecommendation(match, inventory, packageByRule)).ToArray();
+        var candidates = finding.Matches.Select(match => ProjectRecommendation(match, inventory, packageByRule, isAmbiguousDuplicate)).ToArray();
         var incomplete = finding.IncompleteCandidates.Select(candidate => ProjectIncompleteCandidate(candidate, inventory, packageByRule)).ToArray();
-        var status = knowledgeBaseIsEmpty
+        var status = isAmbiguousDuplicate
+            ? ManualGuidanceFindingStatus.AmbiguousDuplicate
+            : knowledgeBaseIsEmpty
             ? ManualGuidanceFindingStatus.KnowledgeBaseEmpty
             : incomplete.Length > 0
                 ? ManualGuidanceFindingStatus.Incomplete
@@ -199,6 +163,7 @@ public static class ManualGuidanceProjector
                     : ManualGuidanceFindingStatus.NoMatch;
         var statusText = status switch
         {
+            ManualGuidanceFindingStatus.AmbiguousDuplicate => "Achado indistinguível de outra saída após redação. A identidade é ambígua e as orientações associadas não são acionáveis.",
             ManualGuidanceFindingStatus.KnowledgeBaseEmpty => "Não avaliado: a base de conhecimento está vazia.",
             ManualGuidanceFindingStatus.MultipleCandidates => $"{candidates.Length} regras candidatas; todas estão listadas para comparação humana, sem escolha automática.",
             ManualGuidanceFindingStatus.SingleCandidate => "Uma regra candidata ManualOnly; match observacional, não causal.",
@@ -207,7 +172,7 @@ public static class ManualGuidanceProjector
                 : "Evidência insuficiente/incompleta: não foi possível confirmar os requisitos de um ou mais candidatos.",
             _ => "Nenhuma regra ManualOnly correspondeu a este achado; isso não prova que um problema inexiste."
         };
-        var findingHeading = $"Achado {index}: {Safe(safeFinding.Title, inventory)} · scanner {Safe(safeFinding.ScannerName, inventory)} · categoria {Safe(safeFinding.Category, inventory)}";
+        var findingHeading = $"{Safe(safeFinding.Title, inventory)} · scanner {Safe(safeFinding.ScannerName, inventory)} · categoria {Safe(safeFinding.Category, inventory)}";
         var evidence = string.IsNullOrWhiteSpace(safeFinding.Evidence)
             ? "Evidência redigida: indisponível neste resultado."
             : "Evidência redigida: " + Safe(safeFinding.Evidence, inventory);
@@ -216,7 +181,9 @@ public static class ManualGuidanceProjector
             : $"Provider estruturado (allowlist): {provider}";
         return new ManualGuidanceFinding(
             runReference,
+            $"Identidade estável nesta execução: {findingIdentity}",
             findingHeading,
+            isAmbiguousDuplicate,
             evidence,
             providerText,
             status,
@@ -228,7 +195,8 @@ public static class ManualGuidanceProjector
     private static ManualGuidanceRecommendation ProjectRecommendation(
         ManualRecommendationRuleMatch match,
         ComputerInventory inventory,
-        IReadOnlyDictionary<(string RuleId, int RuleVersion), KnowledgeRuleProvenance> packageByRule)
+        IReadOnlyDictionary<(string RuleId, int RuleVersion), KnowledgeRuleProvenance> packageByRule,
+        bool isAmbiguousDuplicate)
     {
         var rule = match.Rule;
         var procedure = rule.Procedure!;
@@ -246,8 +214,14 @@ public static class ManualGuidanceProjector
             MatchConfidence.Low => "baixa",
             _ => "indeterminada"
         };
+        var solutions = isAmbiguousDuplicate
+            ? Array.Empty<string>()
+            : (rule.Solutions ?? Array.Empty<string>()).Select(solution => Safe(solution, inventory)).ToArray();
+        var references = ProjectReferences(rule.References, inventory);
         return new ManualGuidanceRecommendation(
-            "ManualOnly / não executada",
+            isAmbiguousDuplicate
+                ? "Ambíguo / não acionável por duplicidade · ManualOnly / não executada"
+                : "ManualOnly / não executada",
             $"{Safe(rule.Id, inventory)} · v{rule.Version}",
             Safe(rule.Title, inventory),
             Safe(rule.Domain, inventory),
@@ -257,10 +231,22 @@ public static class ManualGuidanceProjector
             applicability,
             sourceText,
             PackageSourceText(provenance, inventory),
-            PackageVersionText(provenance),
-            PackageHashText(provenance),
+            PackageVersionText(provenance, inventory),
+            PackageHashText(provenance, inventory),
             Safe(procedure.DiagnosticAction, inventory),
-            Safe(procedure.CorrectiveAction, inventory),
+            isAmbiguousDuplicate
+                ? "Não acionável: achados indistinguíveis após redação; não associe esta orientação a uma ocorrência individual."
+                : Safe(procedure.CorrectiveAction, inventory),
+            isAmbiguousDuplicate
+                ? "Soluções não exibidas: a duplicidade torna a associação ao achado ambígua e não acionável."
+                : solutions.Length == 0
+                    ? "Nenhuma solução foi declarada pela regra."
+                    : "Soluções declaradas pela regra (não executadas).",
+            solutions,
+            isAmbiguousDuplicate
+                ? "Referências declaradas em HTTPS; autenticidade não verificada e associação ao achado ambígua."
+                : "Referências declaradas em HTTPS; autenticidade não verificada.",
+            references,
             Safe(procedure.Risk, inventory),
             Safe(procedure.RequiredPrivilege, inventory),
             procedure.RequiresElevation
@@ -289,18 +275,68 @@ public static class ManualGuidanceProjector
             applicability,
             Safe(candidate.Reason, inventory),
             PackageSourceText(provenance, inventory),
-            PackageVersionText(provenance),
-            PackageHashText(provenance));
+            PackageVersionText(provenance, inventory),
+            PackageHashText(provenance, inventory));
     }
 
     private static string PackageSourceText(KnowledgeRuleProvenance? provenance, ComputerInventory inventory) =>
-        $"Fonte declarada (não autenticada): {(provenance is null ? "não disponível" : Safe(provenance.DeclaredSource, inventory))}";
+        $"Fonte do pacote declarada, não autenticada: {(provenance is null ? "não disponível" : Safe(provenance.DeclaredSource, inventory))}";
 
-    private static string PackageVersionText(KnowledgeRuleProvenance? provenance) =>
-        $"Versão do pacote (não autenticada): {provenance?.PackageVersion ?? "não disponível"}";
+    private static string PackageVersionText(KnowledgeRuleProvenance? provenance, ComputerInventory inventory) =>
+        $"Versão do pacote declarada, não autenticada: {(provenance is null ? "não disponível" : Safe(provenance.PackageVersion, inventory))}";
 
-    private static string PackageHashText(KnowledgeRuleProvenance? provenance) =>
-        $"SHA-256 do pacote (não autentica autoria nem conteúdo): {provenance?.Sha256 ?? "não disponível"}";
+    private static string PackageHashText(KnowledgeRuleProvenance? provenance, ComputerInventory inventory) =>
+        $"SHA-256 declarado do pacote (não autentica autoria nem conteúdo): {(provenance is null ? "não disponível" : Safe(provenance.Sha256, inventory))}";
+
+    private static IReadOnlyList<ManualGuidanceReference> ProjectReferences(
+        IReadOnlyList<KnowledgeReference>? references,
+        ComputerInventory inventory)
+    {
+        var projected = new List<ManualGuidanceReference>();
+        foreach (var reference in references ?? Array.Empty<KnowledgeReference>())
+        {
+            var safeUrl = DiagnosticPrivacyRedactor.RedactText(reference.Url, inventory);
+            if (!Uri.TryCreate(safeUrl, UriKind.Absolute, out var uri) ||
+                uri.Scheme != Uri.UriSchemeHttps ||
+                string.IsNullOrWhiteSpace(uri.Host) ||
+                !string.IsNullOrEmpty(uri.UserInfo))
+            {
+                continue;
+            }
+
+            projected.Add(new ManualGuidanceReference(Safe(reference.Title, inventory), uri.AbsoluteUri));
+        }
+
+        return projected;
+    }
+
+    private static DiagnosticResult RedactFinding(DiagnosticResult finding, ComputerInventory inventory)
+    {
+        var timestamp = finding.Timestamp;
+        var report = new DiagnosticReport([finding], timestamp, timestamp, TimeSpan.Zero, null);
+        return DiagnosticPrivacyRedactor.RedactReport(report, inventory)!.Results[0];
+    }
+
+    private static string BuildFindingIdentity(Guid runId, DiagnosticResult finding)
+    {
+        var canonicalFinding = JsonSerializer.Serialize(new
+        {
+            RunId = runId.ToString("N"),
+            TimestampUtcTicks = finding.Timestamp.ToUniversalTime().UtcDateTime.Ticks,
+            DurationTicks = finding.Duration.Ticks,
+            Scanner = finding.ScannerName,
+            Category = finding.Category,
+            Status = finding.Status.ToString(),
+            Severity = finding.Severity.ToString(),
+            Title = finding.Title,
+            Description = finding.Description,
+            Evidence = finding.Evidence,
+            Recommendation = finding.Recommendation,
+            Provider = DiagnosticSourceMetadata.NormalizeProvider(finding.SourceMetadata?.Provider)
+        });
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalFinding))).ToLowerInvariant();
+        return $"f1-{hash[..24]}";
+    }
 
     private static string FormatRunReference(DiagnosticRun run) =>
         $"Execução {run.Id.ToString("N", CultureInfo.InvariantCulture)[..12]} · concluída em {run.CompletedAtUtc.ToUniversalTime().ToString("dd/MM/yyyy HH:mm:ss 'UTC'", BrazilianCulture)}";

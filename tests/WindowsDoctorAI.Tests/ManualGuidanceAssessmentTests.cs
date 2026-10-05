@@ -314,6 +314,154 @@ public sealed class ManualGuidanceAssessmentTests
     }
 
     [Fact]
+    public async Task DuplicateRedactedFindingsHaveStableRunScopedIdentityAndNoActionableGuidance()
+    {
+        var rule = CreateManualRule("fixture.duplicate") with { Solutions = ["Não aplicar sem distinguir os achados."] };
+        var run = CreateRun(CreateReport(
+            CreateFinding($"Falha {ErrorCode}; password=alpha-secret"),
+            CreateFinding($"Falha {ErrorCode}; password=beta-secret")));
+        var service = CreateAssessmentService(new FakeKnowledgeRepository([rule]));
+
+        var assessment = await service.CreateManualGuidanceAssessmentAsync(run);
+        var repeatedAssessment = await service.CreateManualGuidanceAssessmentAsync(run);
+        var otherRun = await service.CreateManualGuidanceAssessmentAsync(run with
+        {
+            Id = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        });
+
+        Assert.Equal(ManualGuidanceAssessmentStatus.AmbiguousFindings, assessment.Status);
+        Assert.Equal(2, assessment.Findings.Count);
+        Assert.All(assessment.Findings, finding =>
+        {
+            Assert.True(finding.IsAmbiguousDuplicate);
+            Assert.Equal(ManualGuidanceFindingStatus.AmbiguousDuplicate, finding.Status);
+            Assert.Contains("não são acionáveis", finding.StatusText, StringComparison.OrdinalIgnoreCase);
+        });
+        var firstIdentity = assessment.Findings[0].FindingIdentityText;
+        Assert.Equal(firstIdentity, assessment.Findings[1].FindingIdentityText);
+        Assert.Equal(assessment.Findings.Select(item => item.FindingIdentityText),
+            repeatedAssessment.Findings.Select(item => item.FindingIdentityText));
+        Assert.NotEqual(firstIdentity, otherRun.Findings[0].FindingIdentityText);
+        Assert.Contains("f1-", firstIdentity, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha-secret", firstIdentity, StringComparison.Ordinal);
+        Assert.DoesNotContain("beta-secret", firstIdentity, StringComparison.Ordinal);
+        Assert.All(assessment.Findings.SelectMany(item => item.Recommendations), recommendation =>
+        {
+            Assert.Contains("não acionável", recommendation.ManualOnlyStatusText, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Não acionável", recommendation.CorrectiveAction, StringComparison.Ordinal);
+            Assert.Empty(recommendation.Solutions);
+        });
+    }
+
+    [Fact]
+    public async Task HomeViewModelDisplaysDeclaredSolutionsHttpsReferencesAndUnauthenticatedProvenance()
+    {
+        var rule = CreateManualRule("fixture.home-links") with
+        {
+            Solutions = ["Compare manualmente o código do evento com a documentação publicada."],
+            References =
+            [
+                new KnowledgeReference("Microsoft Support", "https://support.microsoft.com/windows/update"),
+                new KnowledgeReference("Invalid HTTP", "http://example.invalid/not-allowed")
+            ]
+        };
+        var provenance = new KnowledgeRuleProvenance(rule.Id, rule.Version, "declared-v8", "Fonte declarada do fixture", new string('e', 64));
+        var repository = new FakeKnowledgeRepository([rule], [provenance]);
+        var viewModel = CreateHomeViewModel(
+            new FakeHistory(CreateRun(CreateReport(CreateFinding($"Falha {ErrorCode}")))), repository);
+
+        await viewModel.LoadLatestAsync();
+
+        var recommendation = Assert.Single(Assert.Single(viewModel.ManualGuidanceFindings).Recommendations);
+        Assert.Equal("Compare manualmente o código do evento com a documentação publicada.", Assert.Single(recommendation.Solutions));
+        var reference = Assert.Single(recommendation.References);
+        Assert.Equal("Microsoft Support", reference.Title);
+        Assert.Equal("https://support.microsoft.com/windows/update", reference.HttpsUrl);
+        Assert.Contains("Fonte do pacote declarada, não autenticada", recommendation.DeclaredPackageSourceText, StringComparison.Ordinal);
+        Assert.Contains("Versão do pacote declarada, não autenticada", recommendation.PackageVersionText, StringComparison.Ordinal);
+        Assert.Contains("SHA-256 declarado do pacote", recommendation.PackageSha256Text, StringComparison.Ordinal);
+        Assert.Empty(viewModel.RepairProposals);
+    }
+
+    [Fact]
+    public async Task HtmlUsesManualAssessmentForIncompleteCandidatesAndNeverCallsThemNoMatch()
+    {
+        var requiredEvidenceRule = CreateManualRule("fixture.html-evidence", strictMatch: new KnowledgeMatchCondition(
+            ErrorCode, ["Windows Update"], [])
+        {
+            RequiredSourceProviders = ["WindowsUpdateClient"],
+            RequiredEvidenceTypes = [nameof(CbsMarkerType.ManifestMissing)]
+        });
+        var missingProviderRule = CreateManualRule("fixture.html-provider", strictMatch: new KnowledgeMatchCondition(
+            ErrorCode, ["Windows Update"], []) { RequiredSourceProviders = ["WindowsUpdateClient"] });
+        var invalidInventoryRule = CreateManualRule("fixture.html-inventory") with
+        {
+            OsTarget = new KnowledgeOperatingSystemTarget([KnowledgeOperatingSystemFamily.WindowsClient], 20000, 30000)
+        };
+        var cases = new[]
+        {
+            (Rule: requiredEvidenceRule, Run: CreateRun(CreateReport(CreateFinding($"Falha {ErrorCode}",
+                DiagnosticSourceMetadata.FromEventProvider("WindowsUpdateClient"))))),
+            (Rule: missingProviderRule, Run: CreateRun(CreateReport(CreateFinding($"Falha {ErrorCode}")))),
+            (Rule: invalidInventoryRule, Run: CreateRun(CreateReport(CreateFinding($"Falha {ErrorCode}"))))
+        };
+
+        foreach (var testCase in cases)
+        {
+            var html = await CreateAssessmentService(new FakeKnowledgeRepository([testCase.Rule]))
+                .CreateHtmlReportAsync(testCase.Run);
+            var visibleHtml = System.Net.WebUtility.HtmlDecode(html);
+
+            Assert.Contains("Orientações manuais por achado", html, StringComparison.Ordinal);
+            Assert.Contains("Avaliação incompleta", visibleHtml, StringComparison.Ordinal);
+            Assert.Contains("Evidência insuficiente/incompleta", visibleHtml, StringComparison.Ordinal);
+            Assert.DoesNotContain("Nenhuma regra importada correspondeu aos achados desta execução", visibleHtml, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task HtmlShowsSolutionsReferencesAndDeclaredProvenanceWithEncodingAndHttpsValidation()
+    {
+        var malicious = "<script>alert('unsafe')</script>";
+        var rule = CreateManualRule("fixture.html-links") with
+        {
+            Title = malicious,
+            Solutions = [$"Revisar manualmente {malicious}"],
+            References =
+            [
+                new KnowledgeReference("Official <img src=x>", "https://support.microsoft.com/windows/update"),
+                new KnowledgeReference("Invalid", "javascript:alert(1)")
+            ]
+        };
+        var provenance = new KnowledgeRuleProvenance(rule.Id, rule.Version, "package-v9", "Declarer <source>", new string('f', 64));
+        var service = CreateAssessmentService(new FakeKnowledgeRepository([rule], [provenance]));
+
+        var html = await service.CreateHtmlReportAsync(CreateRun(CreateReport(CreateFinding($"Falha {ErrorCode}"))));
+        var visibleHtml = System.Net.WebUtility.HtmlDecode(html);
+
+        Assert.Contains("Revisar manualmente &lt;script&gt;", html, StringComparison.Ordinal);
+        Assert.DoesNotContain(malicious, html, StringComparison.Ordinal);
+        Assert.Contains("href=\"https://support.microsoft.com/windows/update\"", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("javascript:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Fonte do pacote declarada, não autenticada", visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("Versão do pacote declarada, não autenticada: package-v9", visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("SHA-256 declarado do pacote", visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("&lt;source&gt;", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HtmlZeroFindingsUsesNonPositiveManualAssessmentState()
+    {
+        var html = await CreateAssessmentService(new FakeKnowledgeRepository([CreateManualRule("fixture.html-empty")]))
+            .CreateHtmlReportAsync(CreateRun(CreateReport()));
+        var visibleHtml = System.Net.WebUtility.HtmlDecode(html);
+
+        Assert.Contains("Nenhum achado foi produzido", visibleHtml, StringComparison.Ordinal);
+        Assert.Contains("não constitui uma avaliação positiva da condição do computador", visibleHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Nenhuma regra importada correspondeu aos achados desta execução", visibleHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SqliteRepositoryReturnsPreviouslyStoredPackageProvenanceForEachCurrentRule()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

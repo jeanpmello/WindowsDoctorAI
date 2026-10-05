@@ -11,7 +11,21 @@ public sealed class HtmlDiagnosticReportFormatter
         DiagnosticRun run,
         IReadOnlyList<DiagnosticRecommendation> recommendations,
         RootCauseAnalysis analysis,
-        int knowledgeRuleCount = -1)
+        int knowledgeRuleCount = -1) =>
+        FormatCore(run, recommendations, analysis, knowledgeRuleCount, null);
+
+    public string Format(DiagnosticRun run, ManualGuidanceAssessment manualGuidance, RootCauseAnalysis analysis)
+    {
+        ArgumentNullException.ThrowIfNull(manualGuidance);
+        return FormatCore(run, Array.Empty<DiagnosticRecommendation>(), analysis, -1, manualGuidance);
+    }
+
+    private static string FormatCore(
+        DiagnosticRun run,
+        IReadOnlyList<DiagnosticRecommendation> recommendations,
+        RootCauseAnalysis analysis,
+        int knowledgeRuleCount,
+        ManualGuidanceAssessment? manualGuidance)
     {
         ArgumentNullException.ThrowIfNull(run);
         ArgumentNullException.ThrowIfNull(recommendations);
@@ -49,12 +63,16 @@ public sealed class HtmlDiagnosticReportFormatter
         }
         builder.AppendLine("</section>");
 
-        builder.AppendLine("<section class=\"card\"><h2>Recomendações</h2>");
-        if (knowledgeRuleCount == 0)
-            builder.AppendLine("<p>A Knowledge Base está vazia: nenhum pacote foi importado. Nenhuma recomendação de conhecimento foi gerada.</p>");
+        builder.AppendLine(manualGuidance is null
+            ? "<section class=\"card\"><h2>Recomendações</h2>"
+            : "<section class=\"card\"><h2>Orientações manuais por achado</h2>");
+        if (manualGuidance is not null)
+            AppendManualGuidance(builder, manualGuidance, sourceInventory);
+        else if (knowledgeRuleCount == 0)
+            builder.AppendLine("<p>A base de conhecimento está vazia: nenhuma regra está disponível. Isso não permite concluir que um problema inexiste ou que o computador está saudável.</p>");
         else if (recommendations.Count == 0)
-            builder.AppendLine("<p>Nenhuma regra importada correspondeu aos achados desta execução; nenhuma recomendação de conhecimento foi gerada.</p>");
-        foreach (var recommendation in recommendations)
+            builder.AppendLine("<p>Nenhuma orientação pré-avaliada foi fornecida a este formatter; esse vazio não demonstra ausência de correspondência nem de problema.</p>");
+        else foreach (var recommendation in recommendations)
         {
             builder.Append("<article class=\"item\"><h3>").Append(S(recommendation.Title, sourceInventory)).Append("</h3><p>").Append(S(recommendation.Domain, sourceInventory)).Append(" · impacto informado: ").Append(E(Label(recommendation.Impact))).Append(" · força do match literal: ").Append(E(Label(recommendation.Confidence))).AppendLine("</p>");
             builder.AppendLine("<p class=\"muted\">A força do match literal não é probabilidade de causa ou de sucesso; impacto e referências são declarações do pacote, não verificadas pelo aplicativo.</p>");
@@ -91,7 +109,10 @@ public sealed class HtmlDiagnosticReportFormatter
             {
                 builder.Append("<li>");
                 var safeUrl = DiagnosticPrivacyRedactor.RedactText(reference.Url, sourceInventory);
-                if (Uri.TryCreate(safeUrl, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                if (Uri.TryCreate(safeUrl, UriKind.Absolute, out var uri) &&
+                    uri.Scheme == Uri.UriSchemeHttps &&
+                    !string.IsNullOrWhiteSpace(uri.Host) &&
+                    string.IsNullOrEmpty(uri.UserInfo))
                     builder.Append("<a rel=\"noreferrer noopener\" href=\"").Append(E(uri.AbsoluteUri)).Append("\">").Append(S(reference.Title, sourceInventory)).Append("</a>");
                 else builder.Append(S(reference.Title, sourceInventory));
                 builder.AppendLine("</li>");
@@ -116,6 +137,110 @@ public sealed class HtmlDiagnosticReportFormatter
         builder.AppendLine("</section>");
         builder.AppendLine("<footer>Relatório gerado localmente. Pacotes e fontes declaradas não têm autoria autenticada pelo aplicativo; regras, referências, causas, soluções e impacto são dados declarados. A força de match descreve correspondência textual, não probabilidade de causa ou sucesso. Correlações não determinam causa. Nenhum reparo é executado por este relatório. O histórico de reparos permanece no SQLite e não é agregado a este relatório.</footer></body></html>");
         return builder.ToString();
+    }
+
+    private static void AppendManualGuidance(
+        StringBuilder builder,
+        ManualGuidanceAssessment assessment,
+        ComputerInventory sourceInventory)
+    {
+        builder.Append("<p class=\"muted\"><strong>Estado:</strong> ").Append(S(assessment.StatusText, sourceInventory)).AppendLine("</p>");
+        if (assessment.Findings.Count == 0)
+        {
+            builder.AppendLine("<p>Nenhum cartão individual foi projetado. Isso não constitui uma avaliação positiva da condição do computador.</p>");
+            return;
+        }
+
+        foreach (var finding in assessment.Findings)
+        {
+            builder.AppendLine("<article class=\"item\">");
+            builder.Append("<p><strong>").Append(S(finding.RunReferenceText, sourceInventory)).AppendLine("</strong></p>");
+            builder.Append("<p><strong>").Append(S(finding.FindingIdentityText, sourceInventory)).AppendLine("</strong></p>");
+            builder.Append("<h3>").Append(S(finding.FindingHeading, sourceInventory)).AppendLine("</h3>");
+            if (finding.IsAmbiguousDuplicate)
+                builder.AppendLine("<p><span class=\"pill\">Ambíguo / duplicado · não acionável</span></p>");
+            builder.Append("<p><span class=\"pill\">").Append(S(finding.StatusText, sourceInventory)).AppendLine("</span></p>");
+            builder.Append("<p>").Append(S(finding.EvidenceText, sourceInventory)).AppendLine("</p>");
+            builder.Append("<p>").Append(S(finding.ProviderText, sourceInventory)).AppendLine("</p>");
+
+            foreach (var recommendation in finding.Recommendations)
+            {
+                builder.Append("<section class=\"item\"><h4>").Append(S(recommendation.ManualOnlyStatusText, sourceInventory)).AppendLine("</h4>");
+                builder.Append("<p><strong>").Append(S(recommendation.Title, sourceInventory)).Append("</strong> · ").Append(S(recommendation.Domain, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Regra/versão:</strong> ").Append(S(recommendation.RuleIdentityText, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p>").Append(S(recommendation.MatchStrengthText, sourceInventory)).Append(" ").Append(S(recommendation.MatchExplanation, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p>").Append(S(recommendation.Explanation, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Aplicabilidade:</strong> ").Append(S(recommendation.ApplicabilityText, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Aplicabilidade declarada:</strong> ").Append(S(recommendation.DeclaredApplicability, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p>").Append(S(recommendation.DeclaredPackageSourceText, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p>").Append(S(recommendation.PackageVersionText, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p>").Append(S(recommendation.PackageSha256Text, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Ação diagnóstica declarada (não executada):</strong> ").Append(S(recommendation.DiagnosticAction, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Orientação corretiva (não executada):</strong> ").Append(S(recommendation.CorrectiveAction, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>").Append(S(recommendation.SolutionsDisclosureText, sourceInventory)).AppendLine("</strong></p>");
+                if (recommendation.Solutions.Count > 0)
+                    AppendList(builder, "Soluções", recommendation.Solutions, sourceInventory);
+                builder.Append("<p><strong>").Append(S(recommendation.ReferencesDisclosureText, sourceInventory)).AppendLine("</strong></p>");
+                AppendManualReferences(builder, recommendation.References, sourceInventory);
+                builder.Append("<p><strong>Risco declarado:</strong> ").Append(S(recommendation.Risk, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Privilégio requerido:</strong> ").Append(S(recommendation.RequiredPrivilege, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p>").Append(S(recommendation.ElevationText, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Backup declarado:</strong> ").Append(S(recommendation.Backup, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Rollback declarado:</strong> ").Append(S(recommendation.Rollback, sourceInventory)).AppendLine("</p>");
+                builder.Append("<p><strong>Limitação da fonte:</strong> ").Append(S(recommendation.SourceLimitation, sourceInventory)).AppendLine("</p></section>");
+            }
+
+            if (finding.IncompleteCandidates.Count > 0)
+            {
+                builder.AppendLine("<h4>Candidatos com evidência/aplicabilidade incompleta — sem match confirmado</h4>");
+                foreach (var candidate in finding.IncompleteCandidates)
+                {
+                    builder.Append("<div class=\"item\"><p><strong>").Append(S(candidate.RuleIdentityText, sourceInventory)).Append(" · ").Append(S(candidate.Title, sourceInventory)).AppendLine("</strong></p>");
+                    builder.Append("<p>").Append(S(candidate.MatchStrengthText, sourceInventory)).AppendLine("</p>");
+                    builder.Append("<p>").Append(S(candidate.ApplicabilityText, sourceInventory)).AppendLine("</p>");
+                    builder.Append("<p>").Append(S(candidate.Reason, sourceInventory)).AppendLine("</p>");
+                    builder.Append("<p>").Append(S(candidate.DeclaredPackageSourceText, sourceInventory)).AppendLine("</p>");
+                    builder.Append("<p>").Append(S(candidate.PackageVersionText, sourceInventory)).AppendLine("</p>");
+                    builder.Append("<p>").Append(S(candidate.PackageSha256Text, sourceInventory)).AppendLine("</p></div>");
+                }
+            }
+
+            builder.AppendLine("</article>");
+        }
+    }
+
+    private static void AppendManualReferences(
+        StringBuilder builder,
+        IReadOnlyList<ManualGuidanceReference> references,
+        ComputerInventory sourceInventory)
+    {
+        if (references.Count == 0)
+        {
+            builder.AppendLine("<p>Nenhuma referência HTTPS declarada foi exibida.</p>");
+            return;
+        }
+
+        builder.AppendLine("<ul>");
+        foreach (var reference in references)
+        {
+            var safeUrl = DiagnosticPrivacyRedactor.RedactText(reference.HttpsUrl, sourceInventory);
+            builder.Append("<li>");
+            if (Uri.TryCreate(safeUrl, UriKind.Absolute, out var uri) &&
+                uri.Scheme == Uri.UriSchemeHttps &&
+                !string.IsNullOrWhiteSpace(uri.Host) &&
+                string.IsNullOrEmpty(uri.UserInfo))
+            {
+                builder.Append("<a rel=\"noreferrer noopener\" href=\"").Append(E(uri.AbsoluteUri)).Append("\">").Append(S(reference.Title, sourceInventory)).Append("</a>");
+            }
+            else
+            {
+                builder.Append(S(reference.Title, sourceInventory));
+            }
+
+            builder.AppendLine("</li>");
+        }
+
+        builder.AppendLine("</ul>");
     }
 
     private static void AppendList(StringBuilder builder, string title, IReadOnlyList<string> values, ComputerInventory sourceInventory)

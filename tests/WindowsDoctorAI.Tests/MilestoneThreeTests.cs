@@ -274,7 +274,21 @@ public sealed class MilestoneThreeTests
         var now = DateTimeOffset.UtcNow;
         var run = new DiagnosticRun(Guid.NewGuid(), now.AddMinutes(-1), now, TimeSpan.FromMinutes(1), new ComputerInventory(),
             CreateReport(Finding("Windows Update", "Sistema", "Evento observado", "Falha 0xAABBCCDD")));
-        var rule = Rule("fixture-rule", ["0xAABBCCDD"], [], KnowledgeImpact.High);
+        var rule = Rule("fixture-rule", ["0xAABBCCDD"], [], KnowledgeImpact.High) with
+        {
+            Procedure = new KnowledgeProcedure(
+                "Revise os dados observados.",
+                "Consulte a documentação e decida manualmente.",
+                "Conta padrão.",
+                false,
+                "Risco não medido.",
+                "Verifique backup conforme política local.",
+                "Rollback não especificado.",
+                "Fonte declarada não verificada.",
+                false,
+                true,
+                true)
+        };
         Assert.Single(new RecommendationEngine().Recommend(run.Report!, [rule]));
         var knowledge = new InMemoryKnowledgeRepository([rule]);
         var audit = new InMemoryRepairAuditLog();
@@ -283,11 +297,12 @@ public sealed class MilestoneThreeTests
         var service = new DiagnosticAssessmentService(knowledge, new RecommendationEngine(), new RootCauseAnalyzer(), new HtmlDiagnosticReportFormatter());
 
         var html = await service.CreateHtmlReportAsync(run);
+        var visibleHtml = System.Net.WebUtility.HtmlDecode(html);
 
         Assert.Contains("Health Score: 80", html);
         Assert.Contains("Falha 0xAABBCCDD", html);
         Assert.Contains("Regra de teste sem afirma&#231;&#227;o factual", html);
-        Assert.Contains("força do match literal", html);
+        Assert.Contains("Força do match:", visibleHtml);
         Assert.DoesNotContain("Histórico de propostas de reparo", html);
         Assert.DoesNotContain("Proposta de teste", html);
         Assert.Single(audit.Records);
@@ -305,8 +320,9 @@ public sealed class MilestoneThreeTests
 
         var html = await service.CreateHtmlReportAsync(run);
 
-        Assert.Contains("Knowledge Base está vazia", html);
-        Assert.Contains("Nenhuma recomendação de conhecimento foi gerada", html);
+        Assert.Contains("Base de conhecimento vazia", html);
+        Assert.DoesNotContain("Nenhuma regra importada correspondeu aos achados desta execução", html);
+        Assert.DoesNotContain("avaliação positiva", html, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
