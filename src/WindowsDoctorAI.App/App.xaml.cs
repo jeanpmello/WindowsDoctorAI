@@ -93,10 +93,11 @@ public partial class App : global::Microsoft.UI.Xaml.Application
         {
             var details = StartupFailureDetails.ForOnLaunched(exception);
             _host?.Services.GetService<ILogger<App>>()?.LogCritical(
-                "A inicialização do Windows Doctor AI falhou; estágio: {StartupStage}; tipo de exceção: {ExceptionType}; HRESULT: {HResultCode}.",
+                "A inicialização do Windows Doctor AI falhou; estágio: {StartupStage}; tipo de exceção: {ExceptionType}; HRESULT: {HResultCode}; tipo da exceção interna: {InnerExceptionType}.",
                 details.Stage,
                 details.ExceptionType,
-                details.HResultCode);
+                details.HResultCode,
+                details.InnerExceptionType);
             StartupFailureDialog.Show(details);
             Environment.Exit(1);
         }
