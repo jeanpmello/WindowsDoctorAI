@@ -2,6 +2,32 @@ using System.Globalization;
 
 namespace WindowsDoctorAI.App;
 
+/// <summary>Estágios internos fixos usados para localizar a fase de uma falha de inicialização.</summary>
+internal enum StartupFailureStage
+{
+    OnLaunched,
+    HostCreation,
+    HostStart,
+    DatabaseInitialization,
+    MainWindowCreation,
+    MainWindowXamlLoading,
+    MainWindowInitialization,
+    MainWindowNavigation,
+    HomePageCreation,
+    HomePageNavigation,
+    MainWindowActivation
+}
+
+/// <summary>Contexto do único fluxo de inicialização da aplicação, mantido como enum fechado.</summary>
+internal static class StartupFailureContext
+{
+    internal static StartupFailureStage CurrentStage { get; private set; } = StartupFailureStage.OnLaunched;
+
+    internal static void Reset() => SetStage(StartupFailureStage.OnLaunched);
+
+    internal static void SetStage(StartupFailureStage stage) => CurrentStage = stage;
+}
+
 /// <summary>Dados allowlistados para diagnóstico de falha durante a inicialização.</summary>
 internal sealed class StartupFailureDetails
 {
@@ -33,8 +59,10 @@ internal sealed class StartupFailureDetails
     internal static StartupFailureDetails ForAppEntryPoint(Exception exception) =>
         Create(AppEntryPointStage, exception);
 
-    internal static StartupFailureDetails ForOnLaunched(Exception exception) =>
-        Create(OnLaunchedStage, exception);
+    internal static StartupFailureDetails ForOnLaunched(
+        Exception exception,
+        StartupFailureStage stage = StartupFailureStage.OnLaunched) =>
+        Create(GetStageLabel(stage), exception);
 
     internal string ToDisplayText()
     {
@@ -51,10 +79,26 @@ internal sealed class StartupFailureDetails
             innerExceptionText);
     }
 
+    private static string GetStageLabel(StartupFailureStage stage) => stage switch
+    {
+        StartupFailureStage.OnLaunched => OnLaunchedStage,
+        StartupFailureStage.HostCreation => "Criar o host da aplicação",
+        StartupFailureStage.HostStart => "Iniciar serviços da aplicação",
+        StartupFailureStage.DatabaseInitialization => "Inicializar o banco local",
+        StartupFailureStage.MainWindowCreation => "Criar MainWindow",
+        StartupFailureStage.MainWindowXamlLoading => "Carregar XAML de MainWindow",
+        StartupFailureStage.MainWindowInitialization => "Inicializar MainWindow",
+        StartupFailureStage.MainWindowNavigation => "Preparar navegação da janela",
+        StartupFailureStage.HomePageCreation => "Criar HomePage",
+        StartupFailureStage.HomePageNavigation => "Navegar para HomePage",
+        StartupFailureStage.MainWindowActivation => "Ativar MainWindow",
+        _ => OnLaunchedStage
+    };
+
     private static StartupFailureDetails Create(string stage, Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
-        var exceptionType = exception.GetType().Name;
+        var exceptionType = GetSimpleExceptionTypeName(exception) ?? "Exception";
         var innerExceptionType = string.Equals(exceptionType, XamlParseExceptionTypeName, StringComparison.Ordinal)
             ? GetSimpleExceptionTypeName(exception.InnerException)
             : null;

@@ -13,11 +13,14 @@ public sealed partial class MainWindow : Window
 
     public MainWindow(IServiceProvider services, INavigationService navigationService)
     {
+        StartupFailureContext.SetStage(StartupFailureStage.MainWindowXamlLoading);
         InitializeComponent();
+        StartupFailureContext.SetStage(StartupFailureStage.MainWindowInitialization);
         _services = services;
         _navigationService = navigationService;
         _navigationService.Navigated += NavigationService_Navigated;
         Closed += MainWindow_Closed;
+        StartupFailureContext.SetStage(StartupFailureStage.MainWindowNavigation);
         RootNavigation.SelectedItem = RootNavigation.MenuItems[0];
         _navigationService.NavigateTo("home");
     }
@@ -29,16 +32,26 @@ public sealed partial class MainWindow : Window
 
     private void NavigationService_Navigated(object? sender, string route)
     {
+        StartupFailureContext.SetStage(StartupFailureStage.MainWindowNavigation);
         PageFrame.Content = null;
         _pageScope?.Dispose();
         _pageScope = _services.CreateScope();
-        PageFrame.Content = route switch
+
+        if (string.Equals(route, "home", StringComparison.OrdinalIgnoreCase))
+            StartupFailureContext.SetStage(StartupFailureStage.HomePageCreation);
+
+        var page = route switch
         {
             "home" => _pageScope.ServiceProvider.GetRequiredService<HomePage>(),
             "about" => _pageScope.ServiceProvider.GetRequiredService<AboutPage>(),
             "settings" => _pageScope.ServiceProvider.GetRequiredService<SettingsPage>(),
             _ => throw new InvalidOperationException($"Rota não registrada: {route}")
         };
+
+        if (string.Equals(route, "home", StringComparison.OrdinalIgnoreCase))
+            StartupFailureContext.SetStage(StartupFailureStage.HomePageNavigation);
+
+        PageFrame.Content = page;
     }
 
     private void MainWindow_Closed(object sender, WindowEventArgs args)

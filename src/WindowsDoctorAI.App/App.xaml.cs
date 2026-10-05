@@ -28,11 +28,13 @@ public partial class App : global::Microsoft.UI.Xaml.Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        StartupFailureContext.Reset();
         try
         {
             var dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WindowsDoctorAI");
             var databasePath = Path.Combine(dataDirectory, "windowsdoctorai.db");
 
+            StartupFailureContext.SetStage(StartupFailureStage.HostCreation);
             _host = Host.CreateDefaultBuilder()
                 .ConfigureAppConfiguration((_, configuration) =>
                 {
@@ -75,7 +77,9 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                 })
                 .Build();
 
+            StartupFailureContext.SetStage(StartupFailureStage.HostStart);
             await _host.StartAsync();
+            StartupFailureContext.SetStage(StartupFailureStage.DatabaseInitialization);
             try
             {
                 await _host.Services.InitializeWindowsDoctorDatabaseAsync();
@@ -85,13 +89,15 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                 _host.Services.GetRequiredService<ILogger<App>>().LogError("Não foi possível inicializar o banco SQLite local; detalhes omitidos por privacidade.");
             }
 
+            StartupFailureContext.SetStage(StartupFailureStage.MainWindowCreation);
             _mainWindow = _host.Services.GetRequiredService<MainWindow>();
             _mainWindow.Closed += MainWindow_Closed;
+            StartupFailureContext.SetStage(StartupFailureStage.MainWindowActivation);
             _mainWindow.Activate();
         }
         catch (Exception exception)
         {
-            var details = StartupFailureDetails.ForOnLaunched(exception);
+            var details = StartupFailureDetails.ForOnLaunched(exception, StartupFailureContext.CurrentStage);
             _host?.Services.GetService<ILogger<App>>()?.LogCritical(
                 "A inicialização do Windows Doctor AI falhou; estágio: {StartupStage}; tipo de exceção: {ExceptionType}; HRESULT: {HResultCode}; tipo da exceção interna: {InnerExceptionType}.",
                 details.Stage,

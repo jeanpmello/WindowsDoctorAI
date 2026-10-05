@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using WindowsDoctorAI.App;
 
@@ -34,6 +35,68 @@ public sealed class StartupFailureDiagnosticsTests
         Assert.DoesNotContain(@"C:\Users\fixture-user\Documents\private.log", displayText, StringComparison.Ordinal);
         Assert.DoesNotContain("fixture-user", displayText, StringComparison.Ordinal);
         Assert.DoesNotContain("fixture-host", displayText, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(StartupFailureStage.MainWindowXamlLoading, "Carregar XAML de MainWindow")]
+    [InlineData(StartupFailureStage.HomePageCreation, "Criar HomePage")]
+    [InlineData(StartupFailureStage.HomePageNavigation, "Navegar para HomePage")]
+    [InlineData(StartupFailureStage.MainWindowActivation, "Ativar MainWindow")]
+    public void OnLaunchedUsesFixedLabelForTheExactStartupStage(StartupFailureStage stage, string expectedLabel)
+    {
+        var details = StartupFailureDetails.ForOnLaunched(CreateSensitiveException(), stage);
+
+        Assert.Equal(expectedLabel, details.Stage);
+        Assert.Contains($"Estágio: {expectedLabel}", details.ToDisplayText(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UnknownStartupStageFallsBackToFixedOnLaunchedLabel()
+    {
+        var details = StartupFailureDetails.ForOnLaunched(CreateSensitiveException(), (StartupFailureStage)int.MaxValue);
+
+        Assert.Equal("OnLaunched", details.Stage);
+    }
+
+    [Fact]
+    public void DisplayedDetailsExposeNoExceptionMessagesStacksOrPersonalPaths()
+    {
+        var details = StartupFailureDetails.ForOnLaunched(
+            CreateSensitiveXamlParseException(),
+            StartupFailureStage.HomePageCreation);
+        var displayText = details.ToDisplayText();
+
+        Assert.Equal(nameof(XamlParseException), details.ExceptionType);
+        Assert.Equal(nameof(SensitiveInnerException), details.InnerExceptionType);
+        Assert.Contains("0x802B000A", displayText, StringComparison.Ordinal);
+        Assert.Contains("Tipo da exceção interna: SensitiveInnerException", displayText, StringComparison.Ordinal);
+
+        var privateValues = new[]
+        {
+            "OUTER_MESSAGE_SENTINEL",
+            "INNER_MESSAGE_SENTINEL",
+            "STACK_TRACE_SENTINEL",
+            @"C:\Users\fixture-user\Documents\private.log",
+            "fixture-user",
+            "fixture-host",
+            "SensitiveInnerException: INNER_MESSAGE_SENTINEL"
+        };
+        foreach (var privateValue in privateValues)
+            Assert.DoesNotContain(privateValue, displayText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StartupFailureDetailsExposeOnlyPrivacyAllowlistedProperties()
+    {
+        var propertyNames = typeof(StartupFailureDetails)
+            .GetProperties(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            new[] { "ExceptionType", "HResult", "HResultCode", "InnerExceptionType", "Stage" },
+            propertyNames);
     }
 
     [Fact]
