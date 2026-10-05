@@ -79,6 +79,7 @@ internal partial class HomeViewModel(
 
     private string? _pendingPackageJson;
     private DiagnosticRun? _currentRun;
+    private bool _displayedRunIsPrevious;
     private CancellationTokenSource? _backupSetCatalogCancellation;
 
     private bool CanRefreshBackupSetCatalog() => !IsLoadingBackupSetCatalog;
@@ -341,7 +342,9 @@ internal partial class HomeViewModel(
         try
         {
             var html = await assessmentService.CreateHtmlReportAsync(_currentRun, cancellationToken);
-            StatusMessage = "Relatório HTML preparado localmente. Escolha onde salvar o arquivo.";
+            StatusMessage = _displayedRunIsPrevious
+                ? "Relatório do diagnóstico anterior preparado. A tentativa mais recente falhou; este relatório não inclui a tentativa malsucedida."
+                : "Relatório HTML preparado localmente. Escolha onde salvar o arquivo.";
             return html;
         }
         catch (Exception)
@@ -353,7 +356,9 @@ internal partial class HomeViewModel(
     }
 
     public void ReportHtmlSaved(string path) =>
-        StatusMessage = "Relatório HTML salvo localmente no destino escolhido. Verifique evidências antes de compartilhá-lo.";
+        StatusMessage = _displayedRunIsPrevious
+            ? "Relatório do diagnóstico anterior salvo localmente. A tentativa mais recente falhou; verifique evidências antes de compartilhá-lo."
+            : "Relatório HTML salvo localmente no destino escolhido. Verifique evidências antes de compartilhá-lo.";
 
     public void ReportHtmlSaveFailed(string message) =>
         StatusMessage = "Não foi possível salvar o relatório HTML no destino escolhido.";
@@ -414,12 +419,14 @@ internal partial class HomeViewModel(
         ManualGuidanceStatus = "Aguardando nova avaliação de orientações manuais; dados da execução anterior foram removidos desta seção.";
         ResetCbsLogAnalysis("A observação CBS é independente do diagnóstico e não será associada a evento algum.");
         UpdateCbsLogCommandState();
+        _displayedRunIsPrevious = _currentRun is not null;
         IsScanning = true;
         StatusMessage = "Coletando inventário e verificações locais somente de leitura. Nenhuma correção será aplicada.";
         try
         {
             var outcome = await runDiagnostic.ExecuteAsync();
             _currentRun = outcome.Run;
+            _displayedRunIsPrevious = false;
             await RefreshManualGuidanceAsync(outcome.Run);
             await RefreshRepairProposalsAsync(outcome.Run);
             UpdateCbsLogCommandState();
@@ -434,6 +441,9 @@ internal partial class HomeViewModel(
         catch (Exception exception)
         {
             logger.LogError("A execução do diagnóstico falhou; detalhes omitidos por privacidade.");
+            LastDiagnosticText = _displayedRunIsPrevious && _currentRun is not null
+                ? $"Nova execução falhou; dados exibidos são do diagnóstico anterior concluído às {_currentRun.CompletedAtUtc.ToLocalTime():G}."
+                : "A tentativa mais recente falhou; nenhum diagnóstico concluído está carregado nesta sessão.";
             ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
             ManualGuidanceStatus = "Avaliação incompleta: a nova execução diagnóstica falhou. Nenhuma conclusão sobre a condição do computador foi produzida.";
             StatusMessage = DiagnosticPrivacyMessages.DiagnosticFailure(exception);
@@ -464,6 +474,7 @@ internal partial class HomeViewModel(
             if (latest is null)
             {
                 _currentRun = null;
+                _displayedRunIsPrevious = false;
                 ManualGuidanceStatus = "Nenhuma execução diagnóstica carregada para avaliar orientações manuais.";
                 RepairProposalStatus = "Nenhum plano disponível: não há uma execução diagnóstica atual salva para revalidar.";
                 LastDiagnosticText = "Nenhum diagnóstico anterior encontrado no histórico local.";
@@ -472,6 +483,7 @@ internal partial class HomeViewModel(
                 return;
             }
             _currentRun = latest;
+            _displayedRunIsPrevious = false;
             await RefreshManualGuidanceAsync(latest, cancellationToken);
             await RefreshRepairProposalsAsync(latest, cancellationToken);
             CanExportHtmlReport = true;

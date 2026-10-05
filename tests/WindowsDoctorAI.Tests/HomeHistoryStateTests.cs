@@ -79,15 +79,57 @@ public sealed class HomeHistoryStateTests
         Assert.Contains("não representa a saúde global do computador", viewModel.HealthScoreDescription, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task FailedRerunLabelsPreviousResultsAndPreviousReport()
+    {
+        var history = new FakeHistory();
+        var settings = new FakeUserSettingsRepository(new UserSettings());
+        var report = new DiagnosticReport(
+            [new DiagnosticResult("Scanner de teste", "Sistema", DiagnosticSeverity.Information, DiagnosticStatus.Healthy,
+                "Verificação de teste", "Sem observações", "Nenhuma ação necessária", "Estado observado", TimeSpan.Zero, FixedNow)],
+            FixedNow,
+            FixedNow,
+            TimeSpan.Zero,
+            new HealthScore(95));
+        var engine = new FakeDiagnosticEngine(report);
+        var viewModel = CreateViewModel(history, settings, report, engine);
+
+        await viewModel.StartDiagnosticCommand.ExecuteAsync(null);
+        Assert.Equal("95", viewModel.HealthScore);
+        Assert.Contains("Concluído às", viewModel.LastDiagnosticText, StringComparison.Ordinal);
+
+        engine.Failure = new InvalidOperationException("FAILURE_MESSAGE_SENTINEL");
+        await viewModel.StartDiagnosticCommand.ExecuteAsync(null);
+
+        Assert.Equal("95", viewModel.HealthScore);
+        Assert.Contains("diagnóstico anterior", viewModel.LastDiagnosticText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Não foi possível concluir o diagnóstico", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("FAILURE_MESSAGE_SENTINEL", viewModel.StatusMessage, StringComparison.Ordinal);
+        Assert.True(viewModel.CanExportHtmlReport);
+
+        var html = await viewModel.CreateCurrentHtmlReportAsync();
+
+        Assert.NotNull(html);
+        Assert.Contains("diagnóstico anterior", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("tentativa mais recente falhou", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+
+        viewModel.ReportHtmlSaved(@"C:\Users\private-user\report.html");
+
+        Assert.Contains("diagnóstico anterior", viewModel.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("private-user", viewModel.StatusMessage, StringComparison.Ordinal);
+    }
+
     private static HomeViewModel CreateViewModel(
         FakeHistory history,
         FakeUserSettingsRepository settings,
-        DiagnosticReport? report = null)
+        DiagnosticReport? report = null,
+        FakeDiagnosticEngine? diagnosticEngine = null)
     {
         var knowledge = new FakeKnowledgeRepository();
+        diagnosticEngine ??= new FakeDiagnosticEngine(report ?? new DiagnosticReport(Array.Empty<DiagnosticResult>(), FixedNow, FixedNow, TimeSpan.Zero, null));
         var runDiagnostic = new RunComputerInventoryDiagnosticUseCase(
             new FakeInventoryScanner(),
-            new FakeDiagnosticEngine(report ?? new DiagnosticReport(Array.Empty<DiagnosticResult>(), FixedNow, FixedNow, TimeSpan.Zero, null)),
+            diagnosticEngine,
             history,
             settings,
             NullLogger<RunComputerInventoryDiagnosticUseCase>.Instance);
@@ -165,7 +207,12 @@ public sealed class HomeHistoryStateTests
 
     private sealed class FakeDiagnosticEngine(DiagnosticReport report) : IDiagnosticEngine
     {
-        public Task<DiagnosticReport> RunAsync(CancellationToken cancellationToken = default) => Task.FromResult(report);
+        public Exception? Failure { get; set; }
+
+        public Task<DiagnosticReport> RunAsync(CancellationToken cancellationToken = default) =>
+            Failure is { } exception
+                ? Task.FromException<DiagnosticReport>(exception)
+                : Task.FromResult(report);
     }
 
     private sealed class FakeKnowledgeRepository : IKnowledgeRepository
