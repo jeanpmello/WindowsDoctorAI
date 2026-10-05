@@ -88,14 +88,38 @@ public interface IRepairPlugin
 }
 
 /// <summary>Orquestrador auditável. A composição do app não registra plugin que altere o sistema.</summary>
-public sealed class RepairEngine(
-    IEnumerable<IRepairPlugin> plugins,
-    IRepairAuditLog auditLog,
-    IRepairPreconditionEvaluator preconditionEvaluator,
-    IRepairProposalAllowlist allowlist)
+public sealed class RepairEngine
 {
-    private readonly IReadOnlyDictionary<string, IRepairPlugin> _plugins = plugins
-        .ToDictionary(plugin => plugin.Proposal.Id, StringComparer.OrdinalIgnoreCase);
+    private readonly IRepairAuditLog auditLog;
+    private readonly IRepairPreconditionEvaluator preconditionEvaluator;
+    private readonly IRepairProposalAllowlist allowlist;
+    private readonly IRepairEvidenceGate evidenceGate;
+    private readonly HashSet<string> _ambiguousProposalIds;
+    private readonly IReadOnlyDictionary<string, IRepairPlugin> _plugins;
+
+    public RepairEngine(
+        IEnumerable<IRepairPlugin> plugins,
+        IRepairAuditLog auditLog,
+        IRepairPreconditionEvaluator preconditionEvaluator,
+        IRepairProposalAllowlist allowlist,
+        IRepairEvidenceGate evidenceGate)
+    {
+        ArgumentNullException.ThrowIfNull(plugins);
+        this.auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
+        this.preconditionEvaluator = preconditionEvaluator ?? throw new ArgumentNullException(nameof(preconditionEvaluator));
+        this.allowlist = allowlist ?? throw new ArgumentNullException(nameof(allowlist));
+        this.evidenceGate = evidenceGate ?? throw new ArgumentNullException(nameof(evidenceGate));
+
+        var allPlugins = plugins.ToArray();
+        _ambiguousProposalIds = allPlugins
+            .GroupBy(plugin => plugin.Proposal.Id, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _plugins = allPlugins
+            .Where(plugin => !_ambiguousProposalIds.Contains(plugin.Proposal.Id))
+            .ToDictionary(plugin => plugin.Proposal.Id, StringComparer.OrdinalIgnoreCase);
+    }
 
     public IReadOnlyList<RepairProposal> GetProposals() => _plugins.Values
         .Select(plugin => plugin.Proposal)
@@ -111,6 +135,10 @@ public sealed class RepairEngine(
     {
         proposalId ??= string.Empty;
         var executionId = Guid.NewGuid();
+        if (_ambiguousProposalIds.Contains(proposalId))
+            return await SaveUnknownAttemptAsync(executionId, proposalId, RepairAction.Execute, null,
+                "ID da proposta ambíguo por duplicidade no catálogo; nenhuma ação foi iniciada.",
+                RepairExecutionStatus.Declined).ConfigureAwait(false);
         if (!_plugins.TryGetValue(proposalId, out var plugin))
             return await SaveUnknownAttemptAsync(executionId, proposalId, RepairAction.Execute, null,
                 "A proposta não está catalogada por um plugin confiável registrado.").ConfigureAwait(false);
@@ -148,8 +176,9 @@ public sealed class RepairEngine(
             var cancelledBeforePreparation = CreateRecord(executionId, proposal, RepairExecutionStatus.Cancelled, true,
                 DateTimeOffset.UtcNow, "Validação cancelada antes do início; nenhum efeito foi iniciado.",
                 RepairAction.Execute, null, consent, preconditionResults);
-            if (!await auditLog.TrySaveConsentAttemptAsync(cancelledBeforePreparation, CancellationToken.None).ConfigureAwait(false))
-                return await SaveReplayAttemptAsync(executionId, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+            var rejectedAttempt = await SaveAttemptOrReplayOrQuarantineAsync(
+                cancelledBeforePreparation, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+            if (rejectedAttempt is not null) return rejectedAttempt;
             return cancelledBeforePreparation;
         }
         catch (Exception)
@@ -162,8 +191,9 @@ public sealed class RepairEngine(
             var blocked = CreateRecord(executionId, proposal, RepairExecutionStatus.Declined, true,
                 DateTimeOffset.UtcNow, "Pré-condições estruturadas ausentes, falsas ou não verificadas; nenhuma ação foi iniciada.",
                 RepairAction.Execute, null, consent, preconditionResults);
-            if (!await auditLog.TrySaveConsentAttemptAsync(blocked, CancellationToken.None).ConfigureAwait(false))
-                return await SaveReplayAttemptAsync(executionId, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+            var rejectedAttempt = await SaveAttemptOrReplayOrQuarantineAsync(
+                blocked, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+            if (rejectedAttempt is not null) return rejectedAttempt;
             return blocked;
         }
 
@@ -173,10 +203,12 @@ public sealed class RepairEngine(
             RepairAction.Execute, null, consent, preconditionResults);
 
         // Reserva de uso único e estado Prepared são atômicos; se a persistência falhar, o plugin não é chamado.
-        if (!await auditLog.TrySaveConsentAttemptAsync(entry, CancellationToken.None).ConfigureAwait(false))
-            return await SaveReplayAttemptAsync(executionId, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+        var preparedFailure = await SaveAttemptOrReplayOrQuarantineAsync(
+            entry, proposal, RepairAction.Execute, null, consent).ConfigureAwait(false);
+        if (preparedFailure is not null) return preparedFailure;
         var context = new RepairExecutionContext(executionId, RepairAction.Execute, null, async () =>
         {
+            await using var evidenceLease = await evidenceGate.AcquireAsync(CancellationToken.None).ConfigureAwait(false);
             IReadOnlyList<RepairConditionResult> startConditions;
             try
             {
@@ -187,6 +219,9 @@ public sealed class RepairEngine(
             {
                 startConditions = NotEvaluated(proposal.StructuredPreconditions);
             }
+            if (proposal.EvidenceGeneration != evidenceLease.CurrentGeneration
+                || evidenceGate.CurrentDiagnosticRunId != proposal.DiagnosticRunId)
+                startConditions = MarkRunConditionFailed(startConditions);
             if (!AreConditionsVerified(proposal.StructuredPreconditions, startConditions))
             {
                 entry = Finish(entry, RepairExecutionStatus.Declined,
@@ -203,9 +238,16 @@ public sealed class RepairEngine(
                 Details = "O plugin sinalizou início após revalidar as pré-condições; o resultado ainda não está concluído.",
                 PreconditionResults = startConditions
             };
-            await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+            if (!await auditLog.TryMarkStartedAsync(entry, CancellationToken.None).ConfigureAwait(false))
+            {
+                entry = Finish(entry, RepairExecutionStatus.Declined,
+                    "Finding em quarentena: outra tentativa já alcançou Started neste DiagnosticRunId; nenhum efeito foi iniciado por esta tentativa.", false);
+                await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+                throw new PreconditionsRejectedException();
+            }
         });
 
+        IRepairEvidenceLease? terminalEvidenceLease = null;
         try
         {
             var result = await plugin.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
@@ -216,9 +258,25 @@ public sealed class RepairEngine(
             }
             else
             {
+                terminalEvidenceLease = await evidenceGate.AcquireAsync(CancellationToken.None).ConfigureAwait(false);
                 var postconditions = await plugin.VerifyPostconditionsAsync(
                     RepairAction.Execute, executionId, null, cancellationToken).ConfigureAwait(false);
-                entry = FinishFromPluginResult(entry, result, postconditions, RepairAction.Execute);
+                if (proposal.EvidenceGeneration != terminalEvidenceLease.CurrentGeneration
+                    || evidenceGate.CurrentDiagnosticRunId != proposal.DiagnosticRunId)
+                {
+                    var stalePostconditions = new RepairPostconditionReport(RepairPostconditionStatus.NotEvaluated,
+                        "A evidência mudou depois de Started; sucesso não pode ser confirmado.")
+                    {
+                        Conditions = NotEvaluated(proposal.StructuredPostconditions)
+                    };
+                    entry = Finish(entry, RepairExecutionStatus.Inconclusive,
+                        "O snapshot mudou após Started; o estado pode ser parcial ou inconclusivo. Nenhum rollback automático foi tentado.", true,
+                        stalePostconditions);
+                }
+                else
+                {
+                    entry = FinishFromPluginResult(entry, result, postconditions, RepairAction.Execute);
+                }
             }
         }
         catch (PreconditionsRejectedException)
@@ -247,7 +305,15 @@ public sealed class RepairEngine(
                 context.ExecutionStarted);
         }
 
-        await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (terminalEvidenceLease is not null)
+                await terminalEvidenceLease.DisposeAsync().ConfigureAwait(false);
+        }
         return entry;
     }
 
@@ -279,6 +345,11 @@ public sealed class RepairEngine(
             return await SaveUnqualifiedRollbackAsync(rollbackAttemptId, "",
                 "Não foi encontrada uma execução para o RepairExecutionId informado.", repairExecutionId, consent)
                 .ConfigureAwait(false);
+
+        if (_ambiguousProposalIds.Contains(source.ProposalId))
+            return await SaveUnqualifiedRollbackAsync(rollbackAttemptId, source.ProposalId,
+                "ID da proposta ambíguo por duplicidade no catálogo; rollback não iniciado.",
+                repairExecutionId, consent, source, RepairExecutionStatus.Declined).ConfigureAwait(false);
 
         if (source.Action != RepairAction.Execute || source.Status != RepairExecutionStatus.Succeeded || !source.ExecutionStarted)
             return await SaveUnqualifiedRollbackAsync(rollbackAttemptId, source.ProposalId,
@@ -328,20 +399,21 @@ public sealed class RepairEngine(
             var blocked = CreateRecord(rollbackAttemptId, proposal, RepairExecutionStatus.Declined, true, now,
                 "Pré-condições estruturadas de rollback ausentes, falsas ou não verificadas; nenhuma ação foi iniciada.",
                 RepairAction.Rollback, repairExecutionId, consent, preconditionResults);
-            if (!await auditLog.TrySaveConsentAttemptAsync(blocked, CancellationToken.None).ConfigureAwait(false))
-                return await SaveReplayAttemptAsync(rollbackAttemptId, proposal, RepairAction.Rollback,
-                    repairExecutionId, consent).ConfigureAwait(false);
+            var rejectedAttempt = await SaveAttemptOrReplayOrQuarantineAsync(
+                blocked, proposal, RepairAction.Rollback, repairExecutionId, consent).ConfigureAwait(false);
+            if (rejectedAttempt is not null) return rejectedAttempt;
             return blocked;
         }
 
         var entry = CreateRecord(rollbackAttemptId, proposal, RepairExecutionStatus.Prepared, true, now,
             "Consentimento de rollback validado para a execução original; aguardando início do plugin.",
             RepairAction.Rollback, repairExecutionId, consent, preconditionResults);
-        if (!await auditLog.TrySaveConsentAttemptAsync(entry, CancellationToken.None).ConfigureAwait(false))
-            return await SaveReplayAttemptAsync(rollbackAttemptId, proposal, RepairAction.Rollback,
-                repairExecutionId, consent).ConfigureAwait(false);
+        var preparedFailure = await SaveAttemptOrReplayOrQuarantineAsync(
+            entry, proposal, RepairAction.Rollback, repairExecutionId, consent).ConfigureAwait(false);
+        if (preparedFailure is not null) return preparedFailure;
         var context = new RepairExecutionContext(rollbackAttemptId, RepairAction.Rollback, repairExecutionId, async () =>
         {
+            await using var evidenceLease = await evidenceGate.AcquireAsync(CancellationToken.None).ConfigureAwait(false);
             IReadOnlyList<RepairConditionResult> startConditions;
             try
             {
@@ -352,6 +424,9 @@ public sealed class RepairEngine(
             {
                 startConditions = NotEvaluated(proposal.StructuredRollbackPreconditions);
             }
+            if (proposal.EvidenceGeneration != evidenceLease.CurrentGeneration
+                || evidenceGate.CurrentDiagnosticRunId != proposal.DiagnosticRunId)
+                startConditions = MarkRunConditionFailed(startConditions);
             if (!AreConditionsVerified(proposal.StructuredRollbackPreconditions, startConditions))
             {
                 entry = Finish(entry, RepairExecutionStatus.Declined,
@@ -368,9 +443,16 @@ public sealed class RepairEngine(
                 Details = $"O plugin sinalizou início do rollback da execução {repairExecutionId:D} após revalidar pré-condições; resultado pendente.",
                 PreconditionResults = startConditions
             };
-            await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+            if (!await auditLog.TryMarkStartedAsync(entry, CancellationToken.None).ConfigureAwait(false))
+            {
+                entry = Finish(entry, RepairExecutionStatus.Declined,
+                    "Finding em quarentena: outra tentativa já alcançou Started neste DiagnosticRunId; nenhum efeito foi iniciado por este rollback.", false);
+                await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+                throw new PreconditionsRejectedException();
+            }
         });
 
+        IRepairEvidenceLease? terminalEvidenceLease = null;
         try
         {
             var result = await plugin.RollbackAsync(repairExecutionId, context, cancellationToken).ConfigureAwait(false);
@@ -381,9 +463,25 @@ public sealed class RepairEngine(
             }
             else
             {
+                terminalEvidenceLease = await evidenceGate.AcquireAsync(CancellationToken.None).ConfigureAwait(false);
                 var postconditions = await plugin.VerifyPostconditionsAsync(
                     RepairAction.Rollback, rollbackAttemptId, repairExecutionId, cancellationToken).ConfigureAwait(false);
-                entry = FinishFromPluginResult(entry, result, postconditions, RepairAction.Rollback);
+                if (proposal.EvidenceGeneration != terminalEvidenceLease.CurrentGeneration
+                    || evidenceGate.CurrentDiagnosticRunId != proposal.DiagnosticRunId)
+                {
+                    var stalePostconditions = new RepairPostconditionReport(RepairPostconditionStatus.NotEvaluated,
+                        "A evidência mudou depois de Started; sucesso do rollback não pode ser confirmado.")
+                    {
+                        Conditions = NotEvaluated(proposal.StructuredRollbackPostconditions)
+                    };
+                    entry = Finish(entry, RepairExecutionStatus.Inconclusive,
+                        "O snapshot mudou após Started; o rollback pode estar parcial ou inconclusivo. Nenhum rollback adicional foi tentado.", true,
+                        stalePostconditions);
+                }
+                else
+                {
+                    entry = FinishFromPluginResult(entry, result, postconditions, RepairAction.Rollback);
+                }
             }
         }
         catch (PreconditionsRejectedException)
@@ -411,7 +509,15 @@ public sealed class RepairEngine(
                 context.ExecutionStarted);
         }
 
-        await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await auditLog.SaveAsync(entry, CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (terminalEvidenceLease is not null)
+                await terminalEvidenceLease.DisposeAsync().ConfigureAwait(false);
+        }
         return entry;
     }
 
@@ -510,6 +616,37 @@ public sealed class RepairEngine(
         return replay;
     }
 
+    private async Task<RepairHistoryRecord?> SaveAttemptOrReplayOrQuarantineAsync(
+        RepairHistoryRecord record,
+        RepairProposal proposal,
+        RepairAction action,
+        Guid? relatedExecutionId,
+        RepairConsent consent)
+    {
+        var result = await auditLog.TrySaveConsentAttemptAsync(record, CancellationToken.None).ConfigureAwait(false);
+        return result.Status switch
+        {
+            RepairConsentAttemptStatus.Saved => null,
+            RepairConsentAttemptStatus.Replay => await SaveReplayAttemptAsync(
+                record.RepairExecutionId, proposal, action, relatedExecutionId, consent).ConfigureAwait(false),
+            RepairConsentAttemptStatus.Quarantined => result.Record ?? await SaveFallbackQuarantineAttemptAsync(record).ConfigureAwait(false),
+            _ => throw new InvalidOperationException("Resultado de claim de consentimento desconhecido.")
+        };
+    }
+
+    private async Task<RepairHistoryRecord> SaveFallbackQuarantineAttemptAsync(RepairHistoryRecord record)
+    {
+        var blocked = record with
+        {
+            Status = RepairExecutionStatus.Declined,
+            ExecutionStarted = false,
+            CompletedAtUtc = DateTimeOffset.UtcNow,
+            Details = "Finding em quarentena após tentativa Started no mesmo DiagnosticRunId; execute novo diagnóstico."
+        };
+        await auditLog.SaveAsync(blocked, CancellationToken.None).ConfigureAwait(false);
+        return blocked;
+    }
+
     private static RepairHistoryRecord CreateRecord(
         Guid executionId,
         RepairProposal proposal,
@@ -539,6 +676,7 @@ public sealed class RepairEngine(
             ProposalKind = proposal.Kind,
             OperationVersion = proposal.OperationVersion,
             DiagnosticRunId = proposal.DiagnosticRunId,
+            EvidenceGeneration = proposal.EvidenceGeneration,
             FindingIdentity = proposal.FindingIdentity,
             RuleId = proposal.RuleId,
             RuleVersion = proposal.RuleVersion,
@@ -555,6 +693,7 @@ public sealed class RepairEngine(
     {
         if (proposal is null || proposal.Kind != RepairProposalKind.NoOpSimulation
             || !Enum.IsDefined(proposal.Kind) || proposal.OperationVersion < 1 || proposal.PlanVersion < 1
+            || proposal.EvidenceGeneration < 0
             || proposal.DiagnosticRunId == Guid.Empty || proposal.RuleVersion < 1
             || proposal.Risk == RepairRiskLevel.Unknown || string.IsNullOrWhiteSpace(proposal.Target)
             || string.IsNullOrWhiteSpace(proposal.RuleId) || !IsSha256Fingerprint(proposal.FindingIdentity)
@@ -629,6 +768,12 @@ public sealed class RepairEngine(
 
     private static IReadOnlyList<RepairConditionResult> NotEvaluated(IReadOnlyList<RepairPlanCondition> conditions) =>
         conditions.Select(condition => new RepairConditionResult(condition.Kind, RepairConditionStatus.NotEvaluated)).ToArray();
+
+    private static IReadOnlyList<RepairConditionResult> MarkRunConditionFailed(
+        IReadOnlyList<RepairConditionResult> results) => results.Select(result =>
+            result.Kind == RepairConditionKind.DiagnosticRunIsCurrent
+                ? result with { Status = RepairConditionStatus.Failed }
+                : result).ToArray();
 
     private static RepairHistoryRecord Finish(
         RepairHistoryRecord entry,

@@ -57,6 +57,17 @@ public sealed class RepairConsentUseEntity
     public long ConsumedAtUnixMilliseconds { get; set; }
 }
 
+public sealed class RepairStartedPlanQuarantineEntity
+{
+    public string QuarantineKey { get; set; } = string.Empty;
+    public Guid DiagnosticRunId { get; set; }
+    public string FindingIdentity { get; set; } = string.Empty;
+    public RepairAction Action { get; set; }
+    public Guid StartedRepairExecutionId { get; set; }
+    public long StartedAtUnixMilliseconds { get; set; }
+    public string PlanFingerprint { get; set; } = string.Empty;
+}
+
 /// <summary>Contexto SQLite local. O inicializador aplica migrações incrementais identificadas por PRAGMA user_version.</summary>
 public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbContext> options) : DbContext(options)
 {
@@ -66,6 +77,7 @@ public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbConte
     public DbSet<KnowledgeBaseVersionEntity> KnowledgeBaseVersions => Set<KnowledgeBaseVersionEntity>();
     public DbSet<RepairHistoryEntity> RepairHistory => Set<RepairHistoryEntity>();
     public DbSet<RepairConsentUseEntity> RepairConsentUses => Set<RepairConsentUseEntity>();
+    public DbSet<RepairStartedPlanQuarantineEntity> RepairStartedPlanQuarantines => Set<RepairStartedPlanQuarantineEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -113,6 +125,15 @@ public sealed class WindowsDoctorDbContext(DbContextOptions<WindowsDoctorDbConte
             entity.Property(item => item.ConsentId).ValueGeneratedNever();
             entity.Property(item => item.FirstRepairExecutionId).IsRequired();
             entity.Property(item => item.ConsumedAtUnixMilliseconds).IsRequired();
+        });
+        modelBuilder.Entity<RepairStartedPlanQuarantineEntity>(entity =>
+        {
+            entity.ToTable("RepairStartedPlanQuarantines");
+            entity.HasKey(item => item.QuarantineKey);
+            entity.Property(item => item.QuarantineKey).ValueGeneratedNever();
+            entity.Property(item => item.FindingIdentity).IsRequired();
+            entity.Property(item => item.Action).IsRequired();
+            entity.Property(item => item.PlanFingerprint).IsRequired();
         });
     }
 }

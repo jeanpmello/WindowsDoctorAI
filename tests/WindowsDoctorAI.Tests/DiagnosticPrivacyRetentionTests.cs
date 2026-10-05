@@ -739,11 +739,12 @@ public sealed class DiagnosticPrivacyRetentionTests
     private sealed class EmptyRepairAuditLog : IRepairAuditLog
     {
         public Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public async Task<bool> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+        public async Task<RepairConsentAttemptResult> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
         {
             await SaveAsync(record, cancellationToken);
-            return true;
+            return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Saved, record);
         }
+        public Task<bool> TryMarkStartedAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<RepairHistoryRecord>>([]);
     }

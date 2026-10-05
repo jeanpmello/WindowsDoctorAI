@@ -19,15 +19,17 @@ public sealed class RepairProposalWorkflowTests
         [new(RepairConditionKind.SimulationCompletedWithoutSystemChanges)];
 
     [Fact]
-    public void BuilderCreatesOnlyTypedAllowlistedProposalAndStableFindingIdentity()
+    public async Task BuilderCreatesOnlyTypedAllowlistedProposalAndStableFindingIdentity()
     {
         var firstFinding = Finding("Falha 0xAABBCCDD", "token=fixture-secret contact person@example.invalid");
         var laterObservation = firstFinding with { Timestamp = DateTimeOffset.UtcNow.AddDays(1) };
         Assert.Equal(DiagnosticFindingIdentity.Create(firstFinding), DiagnosticFindingIdentity.Create(laterObservation));
 
         var run = CreateRun(firstFinding);
-        var builder = CreateBuilder();
-        var proposal = Assert.Single(builder.Build(run, [SafeRule()]));
+        var gate = new RepairEvidenceGate();
+        await MarkCurrentRunAsync(gate, run);
+        var builder = CreateBuilder(gate);
+        var proposal = Assert.Single(builder.Build(run, [SafeRule()]).Proposals);
 
         Assert.Equal(run.Id, proposal.DiagnosticRunId);
         Assert.Equal(DiagnosticFindingIdentity.Create(firstFinding), proposal.FindingIdentity);
@@ -41,9 +43,11 @@ public sealed class RepairProposalWorkflowTests
     }
 
     [Fact]
-    public void ManualOnlyRuleNeverBecomesProposalEvenWhenTestAllowlistContainsItsVersion()
+    public async Task ManualOnlyRuleNeverBecomesProposalEvenWhenTestAllowlistContainsItsVersion()
     {
         var run = CreateRun(Finding("Falha 0xAABBCCDD", "evidência fake"));
+        var gate = new RepairEvidenceGate();
+        await MarkCurrentRunAsync(gate, run);
         var manualRule = SafeRule() with
         {
             Procedure = new KnowledgeProcedure("Diagnosticar", "Aplicar instrução manual", "administrator",
@@ -52,7 +56,7 @@ public sealed class RepairProposalWorkflowTests
                 RequiresUserConfirmation: true, ManualOnly: true)
         };
 
-        Assert.Empty(CreateBuilder().Build(run, [manualRule]));
+        Assert.Empty(CreateBuilder(gate).Build(run, [manualRule]).Proposals);
     }
 
     [Fact]
@@ -74,8 +78,10 @@ public sealed class RepairProposalWorkflowTests
         var knowledge = new FakeKnowledgeRepository([rule]);
         var recommendations = new RecommendationEngine();
         var allowlist = new FixtureAllowlist(rule.Id, rule.Version);
-        var evaluator = new DiagnosticRepairPreconditionEvaluator(history, knowledge, recommendations, allowlist);
-        var proposal = Assert.Single(new RepairProposalBuilder(recommendations, allowlist).Build(run, [rule]));
+        var gate = new RepairEvidenceGate();
+        await MarkCurrentRunAsync(gate, run);
+        var evaluator = new DiagnosticRepairPreconditionEvaluator(history, knowledge, recommendations, allowlist, gate);
+        var proposal = Assert.Single(new RepairProposalBuilder(recommendations, allowlist, gate).Build(run, [rule]).Proposals);
 
         var verified = await evaluator.EvaluateAsync(proposal, RepairAction.Execute, null);
         Assert.Equal(5, verified.Count);
@@ -110,8 +116,10 @@ public sealed class RepairProposalWorkflowTests
         var history = new FakeRunRepository(null);
         var knowledge = new FakeKnowledgeRepository([rule]);
         var allowlist = new FixtureAllowlist(rule.Id, rule.Version);
-        var evaluator = new DiagnosticRepairPreconditionEvaluator(history, knowledge, new RecommendationEngine(), allowlist);
-        var proposal = Assert.Single(new RepairProposalBuilder(new RecommendationEngine(), allowlist).Build(run, [rule]));
+        var gate = new RepairEvidenceGate();
+        await MarkCurrentRunAsync(gate, run);
+        var evaluator = new DiagnosticRepairPreconditionEvaluator(history, knowledge, new RecommendationEngine(), allowlist, gate);
+        var proposal = Assert.Single(new RepairProposalBuilder(new RecommendationEngine(), allowlist, gate).Build(run, [rule]).Proposals);
 
         var results = await evaluator.EvaluateAsync(proposal, RepairAction.Execute, null);
 
@@ -121,7 +129,74 @@ public sealed class RepairProposalWorkflowTests
             results.Single(result => result.Kind == RepairConditionKind.FindingIsPresent).Status);
     }
 
-    private static RepairProposalBuilder CreateBuilder() => new(new RecommendationEngine(), new FixtureAllowlist("fixture.safe-rule", 7));
+    [Fact]
+    public async Task DuplicateFindingIdentityIsExplicitlyAmbiguousAndNeverActionable()
+    {
+        var firstFinding = Finding("Falha 0xAABBCCDD", "observação sintética");
+        var duplicateFinding = firstFinding with { Timestamp = DateTimeOffset.UtcNow.AddMinutes(1) };
+        var now = DateTimeOffset.UtcNow;
+        var report = new DiagnosticReport([firstFinding, duplicateFinding], now.AddSeconds(-1), now,
+            TimeSpan.FromSeconds(1), new HealthScore(80));
+        var run = new DiagnosticRun(Guid.NewGuid(), now.AddSeconds(-1), now, TimeSpan.FromSeconds(1),
+            new ComputerInventory(), report);
+        var gate = new RepairEvidenceGate();
+        await MarkCurrentRunAsync(gate, run);
+
+        var result = CreateBuilder(gate).Build(run, [SafeRule()]);
+
+        Assert.Empty(result.Proposals);
+        Assert.Equal(DiagnosticFindingIdentity.Create(firstFinding), Assert.Single(result.AmbiguousFindingIdentities));
+        Assert.False(result.EvidenceChangedDuringBuild);
+    }
+
+    [Fact]
+    public async Task NewEvidenceGenerationInvalidatesProposalBuildAndConditions()
+    {
+        var run = CreateRun(Finding("Falha 0xAABBCCDD", "observação fake"));
+        var rule = SafeRule();
+        var history = new FakeRunRepository(run);
+        var knowledge = new FakeKnowledgeRepository([rule]);
+        var gate = new RepairEvidenceGate();
+        await MarkCurrentRunAsync(gate, run);
+        var recommendations = new RecommendationEngine();
+        var allowlist = new FixtureAllowlist(rule.Id, rule.Version);
+        var builder = new RepairProposalBuilder(recommendations, allowlist, gate);
+        var evaluator = new DiagnosticRepairPreconditionEvaluator(history, knowledge, recommendations, allowlist, gate);
+        var proposal = Assert.Single(builder.Build(run, [rule]).Proposals);
+
+        await using (var lease = await gate.AcquireAsync()) lease.AdvanceGeneration();
+
+        var rebuilt = builder.Build(run, [rule]);
+        var conditions = await evaluator.EvaluateAsync(proposal, RepairAction.Execute, null);
+        Assert.True(rebuilt.EvidenceChangedDuringBuild);
+        Assert.Empty(rebuilt.Proposals);
+        Assert.Equal(RepairConditionStatus.Failed,
+            conditions.Single(result => result.Kind == RepairConditionKind.DiagnosticRunIsCurrent).Status);
+    }
+
+    [Fact]
+    public async Task PersistedHistoricalRunIsNotActionableInANewSession()
+    {
+        var run = CreateRun(Finding("Falha 0xAABBCCDD", "evidência de histórico"));
+        var gate = new RepairEvidenceGate();
+        var builder = CreateBuilder(gate);
+
+        var historical = builder.Build(run, [SafeRule()]);
+        Assert.True(historical.DiagnosticRunNotCurrent);
+        Assert.Empty(historical.Proposals);
+
+        await MarkCurrentRunAsync(gate, run);
+        Assert.Single(builder.Build(run, [SafeRule()]).Proposals);
+    }
+
+    private static RepairProposalBuilder CreateBuilder(RepairEvidenceGate gate) => new(
+        new RecommendationEngine(), new FixtureAllowlist("fixture.safe-rule", 7), gate);
+
+    private static async Task MarkCurrentRunAsync(RepairEvidenceGate gate, DiagnosticRun run)
+    {
+        await using var lease = await gate.AcquireAsync();
+        lease.MarkDiagnosticRunCurrent(run.Id, run.EvidenceGeneration);
+    }
 
     private static KnowledgeRule SafeRule() => new(
         "fixture.safe-rule", 7, "Fixture", "Regra sintética", KnowledgeImpact.Low,

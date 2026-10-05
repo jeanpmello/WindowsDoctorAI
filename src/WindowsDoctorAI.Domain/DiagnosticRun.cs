@@ -26,7 +26,12 @@ public sealed record DiagnosticRun(
     DateTimeOffset CompletedAtUtc,
     TimeSpan Duration,
     ComputerInventory Inventory,
-    DiagnosticReport? Report = null);
+    DiagnosticReport? Report = null)
+{
+    /// <summary>Epoch do processo que invalida planos durante diagnósticos/importações concorrentes; não é dado persistido.</summary>
+    [JsonIgnore]
+    public long EvidenceGeneration { get; init; }
+}
 
 /// <summary>Preferências locais. Histórico é opt-in; retenção zero conserva registros sem expurgo por idade.</summary>
 public sealed record UserSettings

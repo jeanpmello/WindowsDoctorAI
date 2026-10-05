@@ -386,24 +386,52 @@ public sealed class MilestoneThreeTests
     {
         public List<RepairHistoryRecord> Records { get; } = [];
         private readonly HashSet<Guid> _consumedConsents = [];
+        private readonly HashSet<string> _quarantinedFindings = new(StringComparer.Ordinal);
         public Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
         {
             Records.RemoveAll(existing => existing.RepairExecutionId == record.RepairExecutionId);
             Records.Add(record);
             return Task.CompletedTask;
         }
-        public async Task<bool> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+        public async Task<RepairConsentAttemptResult> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
         {
-            if (record.ConsentId is { } consentId && !_consumedConsents.Add(consentId)) return false;
+            if (record.ConsentId is { } consentId && !_consumedConsents.Add(consentId))
+                return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Replay);
+            var key = QuarantineKey(record);
+            if (key is not null && _quarantinedFindings.Contains(key))
+            {
+                var blocked = record with { Status = RepairExecutionStatus.Declined,
+                    Details = "Finding em quarentena após Started; execute novo diagnóstico." };
+                await SaveAsync(blocked, cancellationToken);
+                return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Quarantined, blocked);
+            }
+            await SaveAsync(record, cancellationToken);
+            return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Saved, record);
+        }
+        public async Task<bool> TryMarkStartedAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+        {
+            var key = QuarantineKey(record);
+            if (key is null || !_quarantinedFindings.Add(key)) return false;
             await SaveAsync(record, cancellationToken);
             return true;
         }
         public Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<RepairHistoryRecord>>(Records.Take(count).ToArray());
+
+        private static string? QuarantineKey(RepairHistoryRecord record) => record.DiagnosticRunId is { } runId
+            && !string.IsNullOrWhiteSpace(record.FindingIdentity)
+            ? $"{runId:D}:{record.FindingIdentity}:{record.Action}"
+            : null;
     }
 
-    private static RepairEngine CreateEngine(IRepairPlugin plugin, InMemoryRepairAuditLog audit) =>
-        new([plugin], audit, new FixturePreconditionEvaluator(), new FixtureAllowlist(plugin.Proposal));
+    private static RepairEngine CreateEngine(IRepairPlugin plugin, InMemoryRepairAuditLog audit)
+    {
+        var gate = new RepairEvidenceGate();
+        var lease = gate.AcquireAsync().AsTask().GetAwaiter().GetResult();
+        lease.MarkDiagnosticRunCurrent(plugin.Proposal.DiagnosticRunId, plugin.Proposal.EvidenceGeneration);
+        lease.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        return new RepairEngine([plugin], audit, new FixturePreconditionEvaluator(), new FixtureAllowlist(plugin.Proposal), gate);
+    }
 
     private sealed class FixtureAllowlist(RepairProposal proposal) : IRepairProposalAllowlist
     {

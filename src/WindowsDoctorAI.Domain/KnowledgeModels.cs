@@ -274,6 +274,7 @@ public sealed record RepairProposal(
     public RepairProposalKind Kind { get; init; } = RepairProposalKind.Unknown;
     public int OperationVersion { get; init; } = 1;
     public Guid DiagnosticRunId { get; init; }
+    public long EvidenceGeneration { get; init; }
     public string FindingIdentity { get; init; } = string.Empty;
     public string RuleId { get; init; } = string.Empty;
     public int RuleVersion { get; init; }
@@ -419,6 +420,7 @@ public sealed class RepairConsent
             StructuredRollbackPreconditions = proposal.StructuredRollbackPreconditions ?? Array.Empty<RepairPlanCondition>(),
             StructuredRollbackPostconditions = proposal.StructuredRollbackPostconditions ?? Array.Empty<RepairPlanCondition>(),
             proposal.DiagnosticRunId,
+            proposal.EvidenceGeneration,
             proposal.FindingIdentity,
             proposal.RuleId,
             proposal.RuleVersion,
@@ -489,6 +491,7 @@ public sealed record RepairHistoryRecord(
     public RepairProposalKind ProposalKind { get; init; } = RepairProposalKind.Unknown;
     public int OperationVersion { get; init; } = 1;
     public Guid? DiagnosticRunId { get; init; }
+    public long EvidenceGeneration { get; init; }
     public string FindingIdentity { get; init; } = string.Empty;
     public string RuleId { get; init; } = string.Empty;
     public int? RuleVersion { get; init; }

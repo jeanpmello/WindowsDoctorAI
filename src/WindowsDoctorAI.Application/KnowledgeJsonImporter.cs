@@ -9,8 +9,9 @@ using WindowsDoctorAI.Domain;
 namespace WindowsDoctorAI.Application;
 
 /// <summary>Valida e importa apenas dados JSON declarativos; nunca interpreta texto como comando ou caminho.</summary>
-public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
+public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository, IRepairEvidenceGate? evidenceGate = null)
 {
+    private readonly IRepairEvidenceGate _evidenceGate = evidenceGate ?? new RepairEvidenceGate();
     public const int MaximumPackageBytes = 512 * 1024;
     public const int MaximumRules = 500;
     private const int MaximumConditionItems = 10;
@@ -60,6 +61,8 @@ public sealed class KnowledgeJsonImporter(IKnowledgeRepository repository)
         ArgumentNullException.ThrowIfNull(repository);
         var (package, hash) = ParseAndValidate(json);
         cancellationToken.ThrowIfCancellationRequested();
+        await using var lease = await _evidenceGate.AcquireAsync(cancellationToken).ConfigureAwait(false);
+        lease.AdvanceGeneration();
         await repository.SaveImportAsync(package, hash, cancellationToken).ConfigureAwait(false);
         return new KnowledgeImportResult(package.Version, package.Rules.Count, hash);
     }

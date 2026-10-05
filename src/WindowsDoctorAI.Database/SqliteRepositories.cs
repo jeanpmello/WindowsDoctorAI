@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,6 +33,7 @@ internal sealed class RepairHistoryAuditMetadata
     public RepairProposalKind ProposalKind { get; set; } = RepairProposalKind.Unknown;
     public int OperationVersion { get; set; } = 1;
     public Guid? DiagnosticRunId { get; set; }
+    public long EvidenceGeneration { get; set; }
     public string FindingIdentity { get; set; } = string.Empty;
     public string RuleId { get; set; } = string.Empty;
     public int? RuleVersion { get; set; }
@@ -212,9 +215,172 @@ public sealed class SqliteKnowledgeRepository(WindowsDoctorDbContext dbContext) 
 
 public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRepairAuditLog
 {
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
+
     public async Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
+        if (record.Status == RepairExecutionStatus.Started && record.ExecutionStarted)
+        {
+            if (await TryMarkStartedAsync(record, cancellationToken).ConfigureAwait(false)) return;
+            throw new InvalidOperationException("Started já foi registrado ou o plano não possui chave de quarantine válida.");
+        }
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                record = Redact(record);
+                await SaveRecordCoreAsync(record, cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch { /* Preserve the original persistence exception. */ }
+                throw;
+            }
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    public async Task<RepairConsentAttemptResult> TrySaveConsentAttemptAsync(
+        RepairHistoryRecord record,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.ConsentId is not { } consentId)
+        {
+            await SaveAsync(record, cancellationToken).ConfigureAwait(false);
+            return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Saved, record);
+        }
+
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var claim = new RepairConsentUseEntity
+            {
+                ConsentId = consentId,
+                FirstRepairExecutionId = record.RepairExecutionId,
+                ConsumedAtUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+            dbContext.RepairConsentUses.Add(claim);
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                var quarantineKey = GetQuarantineKey(record);
+                var quarantined = quarantineKey is not null && await dbContext.RepairStartedPlanQuarantines
+                    .AsNoTracking().AnyAsync(item => item.QuarantineKey == quarantineKey, cancellationToken)
+                    .ConfigureAwait(false);
+                if (quarantined)
+                {
+                    var blocked = record with
+                    {
+                        Status = RepairExecutionStatus.Declined,
+                        ExecutionStarted = false,
+                        CompletedAtUtc = DateTimeOffset.UtcNow,
+                        Details = "Finding em quarentena: uma tentativa anterior alcançou Started neste DiagnosticRunId. Execute novo diagnóstico; nenhuma reconciliação automática foi presumida."
+                    };
+                    await SaveRecordCoreAsync(blocked, cancellationToken).ConfigureAwait(false);
+                    await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                    dbContext.Entry(claim).State = EntityState.Detached;
+                    return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Quarantined, blocked);
+                }
+
+                await SaveRecordCoreAsync(record, cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                dbContext.Entry(claim).State = EntityState.Detached;
+                return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Saved, record);
+            }
+            catch (DbUpdateException exception) when (IsConsentReplay(exception))
+            {
+                try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch { /* Preserve replay result. */ }
+                dbContext.Entry(claim).State = EntityState.Detached;
+                return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Replay);
+            }
+            catch
+            {
+                try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch { /* Preserve the original persistence exception. */ }
+                dbContext.Entry(claim).State = EntityState.Detached;
+                throw;
+            }
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    public async Task<bool> TryMarkStartedAsync(
+        RepairHistoryRecord record,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        var quarantineKey = GetQuarantineKey(record);
+        if (!record.ExecutionStarted || record.Status != RepairExecutionStatus.Started || quarantineKey is null)
+            return false;
+
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            RepairStartedPlanQuarantineEntity? quarantine = null;
+            try
+            {
+                var alreadyQuarantined = await dbContext.RepairStartedPlanQuarantines
+                    .AsNoTracking().AnyAsync(item => item.QuarantineKey == quarantineKey, cancellationToken)
+                    .ConfigureAwait(false);
+                if (alreadyQuarantined)
+                {
+                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    return false;
+                }
+
+                quarantine = new RepairStartedPlanQuarantineEntity
+                {
+                    QuarantineKey = quarantineKey,
+                    DiagnosticRunId = record.DiagnosticRunId!.Value,
+                    FindingIdentity = record.FindingIdentity,
+                    Action = record.Action,
+                    StartedRepairExecutionId = record.RepairExecutionId,
+                    StartedAtUnixMilliseconds = record.CompletedAtUtc.ToUnixTimeMilliseconds(),
+                    PlanFingerprint = record.PlanFingerprint
+                };
+                dbContext.RepairStartedPlanQuarantines.Add(quarantine);
+                await SaveRecordCoreAsync(Redact(record), cancellationToken).ConfigureAwait(false);
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return true;
+            }
+            catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
+            {
+                try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch { /* Preserve duplicate-start result. */ }
+                if (quarantine is not null) dbContext.Entry(quarantine).State = EntityState.Detached;
+                return false;
+            }
+            catch
+            {
+                try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch { /* Preserve the original persistence exception. */ }
+                if (quarantine is not null) dbContext.Entry(quarantine).State = EntityState.Detached;
+                throw;
+            }
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    private async Task SaveRecordCoreAsync(RepairHistoryRecord record, CancellationToken cancellationToken)
+    {
         record = Redact(record);
         var entity = await dbContext.RepairHistory
             .SingleOrDefaultAsync(item => item.Id == record.RepairExecutionId, cancellationToken)
@@ -253,6 +419,7 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
             ProposalKind = record.ProposalKind,
             OperationVersion = record.OperationVersion,
             DiagnosticRunId = record.DiagnosticRunId,
+            EvidenceGeneration = record.EvidenceGeneration,
             FindingIdentity = record.FindingIdentity,
             RuleId = record.RuleId,
             RuleVersion = record.RuleVersion,
@@ -266,49 +433,6 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
             PostconditionResults = record.PostconditionResults.ToArray()
         }, InventoryJson.Options);
         await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    public async Task<bool> TrySaveConsentAttemptAsync(
-        RepairHistoryRecord record,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(record);
-        if (record.ConsentId is not { } consentId)
-        {
-            await SaveAsync(record, cancellationToken).ConfigureAwait(false);
-            return true;
-        }
-
-        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
-        var claim = new RepairConsentUseEntity
-        {
-            ConsentId = consentId,
-            FirstRepairExecutionId = record.RepairExecutionId,
-            ConsumedAtUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-        };
-        dbContext.RepairConsentUses.Add(claim);
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            await SaveAsync(record, cancellationToken).ConfigureAwait(false);
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            dbContext.Entry(claim).State = EntityState.Detached;
-            return true;
-        }
-        catch (DbUpdateException exception) when (IsConsentReplay(exception))
-        {
-            try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
-            catch { /* Preserve replay result. */ }
-            dbContext.Entry(claim).State = EntityState.Detached;
-            return false;
-        }
-        catch
-        {
-            try { await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false); }
-            catch { /* Preserve the original persistence exception. */ }
-            dbContext.Entry(claim).State = EntityState.Detached;
-            throw;
-        }
     }
 
     public async Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default)
@@ -366,6 +490,7 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
             ProposalKind = metadata.ProposalKind,
             OperationVersion = metadata.OperationVersion,
             DiagnosticRunId = metadata.DiagnosticRunId,
+            EvidenceGeneration = metadata.EvidenceGeneration,
             FindingIdentity = metadata.FindingIdentity,
             RuleId = metadata.RuleId,
             RuleVersion = metadata.RuleVersion,
@@ -386,6 +511,20 @@ public sealed class SqliteRepairAuditLog(WindowsDoctorDbContext dbContext) : IRe
             SqliteErrorCode: 19,
             SqliteExtendedErrorCode: 1555
         };
+
+    private static bool IsUniqueConstraintViolation(DbUpdateException exception) =>
+        exception.InnerException is SqliteException { SqliteErrorCode: 19 } sqlite
+        && sqlite.SqliteExtendedErrorCode is 1555 or 2067;
+
+    private static string? GetQuarantineKey(RepairHistoryRecord record)
+    {
+        if (record.DiagnosticRunId is not { } runId || runId == Guid.Empty
+            || string.IsNullOrWhiteSpace(record.FindingIdentity))
+            return null;
+        var keyBytes = SHA256.HashData(Encoding.UTF8.GetBytes(
+            $"{runId:D}\n{record.FindingIdentity}\n{record.Action}"));
+        return Convert.ToHexString(keyBytes).ToLowerInvariant();
+    }
 
     private static RepairHistoryRecord Redact(RepairHistoryRecord record) => record with
     {
@@ -409,6 +548,7 @@ public static class DatabaseServiceCollectionExtensions
         var fullPath = Path.GetFullPath(databasePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         var connectionString = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = fullPath }.ToString();
+        services.AddSingleton<IRepairEvidenceGate, RepairEvidenceGate>();
         services.AddDbContext<WindowsDoctorDbContext>(options => options.UseSqlite(connectionString));
         services.AddScoped<IDiagnosticRunRepository, SqliteDiagnosticRunRepository>();
         services.AddScoped<IUserSettingsRepository, SqliteUserSettingsRepository>();
@@ -429,7 +569,7 @@ public static class DatabaseServiceCollectionExtensions
 /// <summary>Schema local evolui em passos idempotentes; PRAGMA user_version identifica o último passo concluído.</summary>
 public static class WindowsDoctorDatabaseMigrator
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 7;
 
     public static async Task MigrateAsync(WindowsDoctorDbContext context, CancellationToken cancellationToken = default)
     {
@@ -481,6 +621,14 @@ public static class WindowsDoctorDatabaseMigrator
                     "ConsentId" TEXT NOT NULL CONSTRAINT "PK_RepairConsentUses" PRIMARY KEY,
                     "FirstRepairExecutionId" TEXT NOT NULL,
                     "ConsumedAtUnixMilliseconds" INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS "RepairStartedPlanQuarantines" (
+                    "QuarantineKey" TEXT NOT NULL CONSTRAINT "PK_RepairStartedPlanQuarantines" PRIMARY KEY,
+                    "DiagnosticRunId" TEXT NOT NULL,
+                    "FindingIdentity" TEXT NOT NULL,
+                    "Action" INTEGER NOT NULL,
+                    "StartedRepairExecutionId" TEXT NOT NULL,
+                    "StartedAtUnixMilliseconds" INTEGER NOT NULL,
+                    "PlanFingerprint" TEXT NOT NULL);
                 """, cancellationToken).ConfigureAwait(false);
 
             if (!await HasRepairHistoryMetadataColumnAsync(context, cancellationToken).ConfigureAwait(false))
@@ -494,6 +642,13 @@ public static class WindowsDoctorDatabaseMigrator
             {
                 await context.Database.ExecuteSqlRawAsync("""
                     ALTER TABLE "UserSettings" ADD COLUMN "DiagnosticRetentionDays" INTEGER NOT NULL DEFAULT 0;
+                    """, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!await HasRepairStartedQuarantineActionColumnAsync(context, cancellationToken).ConfigureAwait(false))
+            {
+                await context.Database.ExecuteSqlRawAsync("""
+                    ALTER TABLE "RepairStartedPlanQuarantines" ADD COLUMN "Action" INTEGER NOT NULL DEFAULT 0;
                     """, cancellationToken).ConfigureAwait(false);
             }
 
@@ -536,6 +691,21 @@ public static class WindowsDoctorDatabaseMigrator
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             if (string.Equals(reader.GetString(1), "DiagnosticRetentionDays", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static async Task<bool> HasRepairStartedQuarantineActionColumnAsync(
+        WindowsDoctorDbContext context,
+        CancellationToken cancellationToken)
+    {
+        await using var command = context.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "PRAGMA table_info(\"RepairStartedPlanQuarantines\");";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (string.Equals(reader.GetString(1), "Action", StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;

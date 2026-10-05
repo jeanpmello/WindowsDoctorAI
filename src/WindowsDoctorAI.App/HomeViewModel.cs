@@ -506,13 +506,26 @@ internal partial class HomeViewModel(
 
             var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(true);
             var registeredIds = repairEngine.GetProposals().Select(proposal => proposal.Id).ToHashSet(StringComparer.Ordinal);
-            var proposals = repairProposalBuilder.Build(run, rules)
+            var build = repairProposalBuilder.Build(run, rules);
+            if (build.EvidenceChangedDuringBuild)
+            {
+                RepairProposalStatus = "Snapshot de evidência invalidado por novo diagnóstico/importação; execute um novo diagnóstico antes de consentir.";
+                return;
+            }
+            if (build.DiagnosticRunNotCurrent)
+            {
+                RepairProposalStatus = "O histórico carregado não é um diagnóstico atual desta sessão; execute novo diagnóstico antes de consentir.";
+                return;
+            }
+            var proposals = build.Proposals
                 .Where(proposal => registeredIds.Contains(proposal.Id))
                 .Select(RepairProposalDisplayItem.From)
                 .ToArray();
             RepairProposals = proposals;
             RepairProposalStatus = proposals.Length == 0
-                ? "Nenhum plano tipado está allowlistado para estes achados. Procedimentos ManualOnly continuam manuais; nenhum comando será sugerido ou executado."
+                ? build.AmbiguousFindingIdentities.Count > 0
+                    ? $"{build.AmbiguousFindingIdentities.Count} identidade(s) de finding ambígua(s); as propostas correspondentes foram bloqueadas. Nenhum plano duplicado é acionável."
+                    : "Nenhum plano tipado está allowlistado para estes achados. Procedimentos ManualOnly continuam manuais; nenhum comando será sugerido ou executado."
                 : "Planos simulados allowlistados. Revise todos os detalhes; somente o botão explícito emite consentimento one-shot. Nenhum reparo real está habilitado nesta versão.";
         }
         catch (Exception)
@@ -539,16 +552,26 @@ internal partial class HomeViewModel(
         {
             var rules = await knowledgeRepository.GetLatestRulesAsync().ConfigureAwait(true);
             var latest = await history.GetLatestAsync().ConfigureAwait(true);
-            var current = latest?.Id == _currentRun.Id
-                ? repairProposalBuilder.Build(_currentRun, rules).SingleOrDefault(proposal =>
+            var build = latest?.Id == _currentRun.Id
+                ? repairProposalBuilder.Build(_currentRun, rules)
+                : null;
+            var candidates = build?.Proposals.Where(proposal =>
                     string.Equals(proposal.Id, item.Proposal.Id, StringComparison.Ordinal)
                     && string.Equals(proposal.FindingIdentity, item.Proposal.FindingIdentity, StringComparison.Ordinal)
                     && proposal.RuleVersion == item.Proposal.RuleVersion
+                    && proposal.EvidenceGeneration == item.Proposal.EvidenceGeneration
                     && string.Equals(proposal.EvidenceFingerprint, item.Proposal.EvidenceFingerprint, StringComparison.Ordinal))
+                .Take(2).ToArray() ?? Array.Empty<RepairProposal>();
+            var current = build is { EvidenceChangedDuringBuild: false } && candidates.Length == 1
+                ? candidates[0]
                 : null;
             if (current is null)
             {
-                RepairProposalStatus = "Plano ou evidência obsoletos; consentimento não emitido. Execute novamente o diagnóstico.";
+                RepairProposalStatus = build?.AmbiguousFindingIdentities.Contains(item.Proposal.FindingIdentity, StringComparer.Ordinal) == true
+                    ? "Finding ambíguo; consentimento não emitido. Nenhuma proposta duplicada é acionável."
+                    : build?.DiagnosticRunNotCurrent == true
+                        ? "O diagnóstico não é atual nesta sessão; consentimento não emitido. Execute novo diagnóstico."
+                        : "Plano ou evidência obsoletos; consentimento não emitido. Execute novamente o diagnóstico.";
                 await RefreshRepairProposalsAsync(_currentRun).ConfigureAwait(true);
                 return;
             }
@@ -560,6 +583,8 @@ internal partial class HomeViewModel(
             {
                 RepairExecutionStatus.Succeeded => "Simulação concluída e pós-condições verificadas; nenhum reparo de sistema foi executado.",
                 RepairExecutionStatus.Inconclusive => "Tentativa inconclusiva; pós-condições não foram verificadas. Nenhum rollback automático será tentado.",
+                RepairExecutionStatus.Declined when result.Details.Contains("quarentena", StringComparison.OrdinalIgnoreCase)
+                    => "Este finding já alcançou Started em tentativa anterior e permanece em quarentena; execute novo diagnóstico. Nenhuma reconciliação automática foi presumida.",
                 RepairExecutionStatus.Declined => "Tentativa bloqueada ou consentimento já utilizado; nenhuma ação adicional foi iniciada.",
                 RepairExecutionStatus.Cancelled => "Tentativa cancelada; se já havia começado, o estado pode ser parcial ou inconclusivo. Nenhum rollback automático será tentado.",
                 _ => "Tentativa registrada sem execução de reparo de sistema. Consulte a auditoria local."
@@ -568,7 +593,8 @@ internal partial class HomeViewModel(
         }
         catch (Exception)
         {
-            RepairProposalStatus = "Não foi possível concluir o fluxo de consentimento; detalhes internos foram omitidos.";
+            RepairProposalStatus = "Não foi possível registrar o resultado. Se a tentativa alcançou Started, trate-a como parcial/inconclusiva: não há reconciliação automática e este plano fica bloqueado até novo diagnóstico.";
+            RepairProposals = Array.Empty<RepairProposalDisplayItem>();
             logger.LogWarning("O fluxo de consentimento de proposta falhou; detalhes omitidos por privacidade.");
         }
         finally
@@ -665,7 +691,7 @@ internal sealed record RepairProposalDisplayItem(
             RepairRiskLevel.High => "Alto (simulação)",
             _ => "Desconhecido — bloqueado"
         },
-        $"DiagnosticRunId: {proposal.DiagnosticRunId:D}\nFinding: {proposal.FindingIdentity}\nRegra: {proposal.RuleId} v{proposal.RuleVersion}",
+        $"DiagnosticRunId: {proposal.DiagnosticRunId:D}\nGeração de evidência: {proposal.EvidenceGeneration}\nFinding: {proposal.FindingIdentity}\nRegra: {proposal.RuleId} v{proposal.RuleVersion}",
         string.Join(Environment.NewLine, proposal.StructuredPreconditions.Select(condition => "• " + condition.DisplayText)),
         string.Join(Environment.NewLine, proposal.StructuredPostconditions.Select(condition => "• " + condition.DisplayText)),
         proposal.SupportsRollback ? "Sim; ação separada e consentimento próprio." : "Não",

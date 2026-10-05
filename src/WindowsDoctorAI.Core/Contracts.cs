@@ -69,8 +69,10 @@ public interface IKnowledgeRepository
 public interface IRepairAuditLog
 {
     Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
-    /// <summary>Grava a primeira tentativa vinculada ao consentimento de forma atômica; false significa replay.</summary>
-    Task<bool> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
+    /// <summary>Grava consentimento/Prepared uma única vez e recusa planos já quarantinados.</summary>
+    Task<RepairConsentAttemptResult> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
+    /// <summary>Grava Started e sua quarentena durável atomicamente; false significa que já havia Started para o achado/run.</summary>
+    Task<bool> TryMarkStartedAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default);
 
     async Task<RepairHistoryRecord?> GetByExecutionIdAsync(Guid repairExecutionId, CancellationToken cancellationToken = default)
@@ -78,6 +80,32 @@ public interface IRepairAuditLog
         var recent = await GetRecentAsync(500, cancellationToken).ConfigureAwait(false);
         return recent.FirstOrDefault(record => record.RepairExecutionId == repairExecutionId);
     }
+}
+
+public enum RepairConsentAttemptStatus
+{
+    Saved,
+    Replay,
+    Quarantined
+}
+
+public sealed record RepairConsentAttemptResult(
+    RepairConsentAttemptStatus Status,
+    RepairHistoryRecord? Record = null);
+
+/// <summary>Serializa mudanças da evidência validada e o trecho final de validação→Started.</summary>
+public interface IRepairEvidenceGate
+{
+    long CurrentGeneration { get; }
+    Guid? CurrentDiagnosticRunId { get; }
+    ValueTask<IRepairEvidenceLease> AcquireAsync(CancellationToken cancellationToken = default);
+}
+
+public interface IRepairEvidenceLease : IAsyncDisposable
+{
+    long CurrentGeneration { get; }
+    long AdvanceGeneration();
+    void MarkDiagnosticRunCurrent(Guid diagnosticRunId, long expectedGeneration);
 }
 
 /// <summary>Allowlist compilada de pares exatos de regra/versão e planos tipados.</summary>

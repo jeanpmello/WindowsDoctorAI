@@ -114,6 +114,31 @@ public sealed class RepairEngineTests
     }
 
     [Fact]
+    public async Task NewConsentCannotRestartSamePlanActionInSameDiagnosticRun()
+    {
+        var proposal = CreateProposal();
+        var audit = new InMemoryRepairAuditLog();
+        var plugin = new DeterministicRepairPlugin(proposal)
+        {
+            Verification = VerifiedSimulationPostconditions(),
+            Execute = async (context, cancellationToken) =>
+            {
+                await context.MarkStartedAsync(cancellationToken);
+                return new RepairPluginResult("simulação fake concluída");
+            }
+        };
+        var engine = CreateEngine(plugin, audit);
+
+        var first = await engine.ExecuteAsync(proposal.Id, RepairConsent.Confirm(proposal));
+        var second = await engine.ExecuteAsync(proposal.Id, RepairConsent.Confirm(proposal));
+
+        Assert.Equal(RepairExecutionStatus.Succeeded, first.Status);
+        Assert.Equal(RepairExecutionStatus.Declined, second.Status);
+        Assert.Contains("quarentena", second.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, plugin.ExecuteCount);
+    }
+
+    [Fact]
     public async Task NotEvaluatedPostconditionNeverProducesSucceeded()
     {
         var proposal = CreateProposal();
@@ -263,6 +288,52 @@ public sealed class RepairEngineTests
     }
 
     [Fact]
+    public async Task TerminalPersistenceFailureAfterStartedQuarantinesPlanAndRejectsNewConsent()
+    {
+        var proposal = CreateProposal();
+        var audit = new InMemoryRepairAuditLog { FailVerifiedTerminalWrites = true };
+        var plugin = new DeterministicRepairPlugin(proposal)
+        {
+            Verification = VerifiedSimulationPostconditions(),
+            Execute = async (context, cancellationToken) =>
+            {
+                await context.MarkStartedAsync(cancellationToken);
+                return new RepairPluginResult("fake completed, terminal save fails");
+            }
+        };
+        var engine = CreateEngine(plugin, audit);
+
+        await Assert.ThrowsAsync<IOException>(() => engine.ExecuteAsync(proposal.Id, RepairConsent.Confirm(proposal)));
+        var retry = await engine.ExecuteAsync(proposal.Id, RepairConsent.Confirm(proposal));
+
+        Assert.Equal(RepairExecutionStatus.Started,
+            Assert.Single(audit.Records, record => record.Status == RepairExecutionStatus.Started).Status);
+        Assert.Equal(RepairExecutionStatus.Declined, retry.Status);
+        Assert.Contains("quarentena", retry.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("novo diagnóstico", retry.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, plugin.ExecuteCount);
+        Assert.DoesNotContain(audit.Records, record => record.Status == RepairExecutionStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task DuplicateCatalogProposalIdsAreExcludedAndAuditedInsteadOfThrowing()
+    {
+        var proposal = CreateProposal();
+        var first = new DeterministicRepairPlugin(proposal);
+        var second = new DeterministicRepairPlugin(proposal);
+        var audit = new InMemoryRepairAuditLog();
+        var engine = new RepairEngine([first, second], audit, new VerifiedPreconditionEvaluator(),
+            new FixtureRepairProposalAllowlist(proposal), new RepairEvidenceGate());
+
+        Assert.Empty(engine.GetProposals());
+        var result = await engine.ExecuteAsync(proposal.Id, RepairConsent.Confirm(proposal));
+
+        Assert.Equal(RepairExecutionStatus.Declined, result.Status);
+        Assert.Contains("ambíguo", result.Details, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, first.ExecuteCount + second.ExecuteCount);
+    }
+
+    [Fact]
     public async Task PreconditionsAreRevalidatedAfterPreparedAndBeforeStarted()
     {
         var proposal = CreateProposal();
@@ -287,6 +358,70 @@ public sealed class RepairEngineTests
         Assert.Equal(0, effectCount);
         Assert.Equal(2, evaluator.CallCount);
         Assert.Contains(result.PreconditionResults, condition => condition.Status == RepairConditionStatus.Failed);
+    }
+
+    [Fact]
+    public async Task EvidenceChangeAfterPreparedButBeforeStartedInvalidatesConsentBeforeEffect()
+    {
+        var proposal = CreateProposal();
+        var gate = new RepairEvidenceGate();
+        await using (var lease = await gate.AcquireAsync())
+            lease.MarkDiagnosticRunCurrent(proposal.DiagnosticRunId, proposal.EvidenceGeneration);
+        var audit = new InMemoryRepairAuditLog();
+        var effectCount = 0;
+        var plugin = new DeterministicRepairPlugin(proposal)
+        {
+            Execute = async (context, cancellationToken) =>
+            {
+                // Stand-in for a new diagnostic/import acquiring the same evidence gate after Prepared.
+                await using (var lease = await gate.AcquireAsync(cancellationToken)) lease.AdvanceGeneration();
+                await context.MarkStartedAsync(cancellationToken);
+                effectCount++;
+                return new RepairPluginResult("efeito fake proibido após invalidação");
+            }
+        };
+        var engine = CreateEngine(plugin, audit, evidenceGate: gate);
+
+        var result = await engine.ExecuteAsync(proposal.Id, RepairConsent.Confirm(proposal));
+
+        Assert.Equal(RepairExecutionStatus.Declined, result.Status);
+        Assert.False(result.ExecutionStarted);
+        Assert.Equal(0, effectCount);
+        Assert.Contains(result.PreconditionResults, condition => condition.Kind == RepairConditionKind.DiagnosticRunIsCurrent
+            && condition.Status == RepairConditionStatus.Failed);
+        Assert.DoesNotContain(audit.Records, record => record.Status == RepairExecutionStatus.Started);
+    }
+
+    [Fact]
+    public async Task ConcurrentEvidenceMutationWaitsUntilStartedIsDurablyRecorded()
+    {
+        var proposal = CreateProposal();
+        var gate = new RepairEvidenceGate();
+        await using (var lease = await gate.AcquireAsync())
+            lease.MarkDiagnosticRunCurrent(proposal.DiagnosticRunId, proposal.EvidenceGeneration);
+        var audit = new InMemoryRepairAuditLog();
+        var evaluator = new GateRacingPreconditionEvaluator(gate, audit, proposal.StructuredPreconditions);
+        var effectCount = 0;
+        var plugin = new DeterministicRepairPlugin(proposal)
+        {
+            Verification = VerifiedSimulationPostconditions(),
+            Execute = async (context, cancellationToken) =>
+            {
+                await context.MarkStartedAsync(cancellationToken);
+                await evaluator.MutationTask.WaitAsync(TimeSpan.FromSeconds(5));
+                effectCount++;
+                return new RepairPluginResult("fake após Started");
+            }
+        };
+        var engine = CreateEngine(plugin, audit, evaluator, gate);
+
+        var result = await engine.ExecuteAsync(proposal.Id, RepairConsent.Confirm(proposal));
+
+        Assert.Equal(RepairExecutionStatus.Inconclusive, result.Status);
+        Assert.Equal(RepairPostconditionStatus.NotEvaluated, result.PostconditionStatus);
+        Assert.Equal(1, effectCount);
+        Assert.NotEmpty(audit.StartedExecutionIds);
+        Assert.DoesNotContain(audit.Records, record => record.Status == RepairExecutionStatus.Succeeded);
     }
 
     [Theory]
@@ -536,6 +671,50 @@ public sealed class RepairEngineTests
     }
 
     [Fact]
+    public async Task SchemaV6QuarantineMigratesActionColumnWithoutDroppingRows()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var runId = Guid.NewGuid();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                CREATE TABLE "RepairStartedPlanQuarantines" (
+                    "QuarantineKey" TEXT NOT NULL PRIMARY KEY,
+                    "DiagnosticRunId" TEXT NOT NULL,
+                    "FindingIdentity" TEXT NOT NULL,
+                    "StartedRepairExecutionId" TEXT NOT NULL,
+                    "StartedAtUnixMilliseconds" INTEGER NOT NULL,
+                    "PlanFingerprint" TEXT NOT NULL);
+                INSERT INTO "RepairStartedPlanQuarantines"
+                    VALUES ('fixture-key', $run, 'fixture-finding', $execution, 123, 'fixture-fingerprint');
+                PRAGMA user_version = 6;
+                """;
+            command.Parameters.AddWithValue("$run", runId.ToString("D"));
+            command.Parameters.AddWithValue("$execution", Guid.NewGuid().ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        await using var context = new WindowsDoctorDbContext(options);
+
+        await WindowsDoctorDatabaseMigrator.MigrateAsync(context);
+
+        await using var inspect = connection.CreateCommand();
+        inspect.CommandText = "PRAGMA table_info(\"RepairStartedPlanQuarantines\");";
+        await using var reader = await inspect.ExecuteReaderAsync();
+        var columns = new List<string>();
+        while (await reader.ReadAsync()) columns.Add(reader.GetString(1));
+        await reader.DisposeAsync();
+        Assert.Contains("Action", columns);
+        Assert.Equal(RepairAction.Execute,
+            await context.RepairStartedPlanQuarantines.Select(row => row.Action).SingleAsync());
+        await using var verifyVersion = connection.CreateCommand();
+        verifyVersion.CommandText = "PRAGMA user_version;";
+        Assert.Equal(WindowsDoctorDatabaseMigrator.CurrentVersion,
+            Convert.ToInt32(await verifyVersion.ExecuteScalarAsync()));
+    }
+
+    [Fact]
     public async Task SqliteAuditLogUpsertsAndLoadsByRepairExecutionId()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -559,7 +738,18 @@ public sealed class RepairEngineTests
             Postconditions = proposal.Postconditions!,
             PlanFingerprint = consent.PlanFingerprint,
             ConsentId = consent.ConsentId,
-            ConsentConfirmedAtUtc = consent.ConfirmedAtUtc
+            ConsentConfirmedAtUtc = consent.ConfirmedAtUtc,
+            ProposalKind = proposal.Kind,
+            OperationVersion = proposal.OperationVersion,
+            DiagnosticRunId = proposal.DiagnosticRunId,
+            EvidenceGeneration = proposal.EvidenceGeneration,
+            FindingIdentity = proposal.FindingIdentity,
+            RuleId = proposal.RuleId,
+            RuleVersion = proposal.RuleVersion,
+            EvidenceFingerprint = proposal.EvidenceFingerprint,
+            RedactedEvidence = proposal.RedactedEvidence,
+            StructuredPreconditions = proposal.StructuredPreconditions,
+            StructuredPostconditions = proposal.StructuredPostconditions
         };
 
         await audit.SaveAsync(prepared);
@@ -577,6 +767,7 @@ public sealed class RepairEngineTests
         Assert.Equal(proposal.PlanVersion, loaded.PlanVersion);
         Assert.Equal(proposal.Target, loaded.Target);
         Assert.Equal(consent.ConsentId, loaded.ConsentId);
+        Assert.Equal(proposal.EvidenceGeneration, loaded.EvidenceGeneration);
         Assert.Equal(proposal.Preconditions, loaded.Preconditions);
         Assert.Equal("started", loaded.Details);
         Assert.Single(await audit.GetRecentAsync(10));
@@ -616,10 +807,71 @@ public sealed class RepairEngineTests
         var first = await audit.TrySaveConsentAttemptAsync(Record(Guid.NewGuid()));
         var replay = await audit.TrySaveConsentAttemptAsync(Record(Guid.NewGuid()));
 
-        Assert.True(first);
-        Assert.False(replay);
+        Assert.Equal(RepairConsentAttemptStatus.Saved, first.Status);
+        Assert.Equal(RepairConsentAttemptStatus.Replay, replay.Status);
         Assert.Equal(1, await context.RepairConsentUses.CountAsync());
         Assert.Single(await audit.GetRecentAsync(10));
+    }
+
+    [Fact]
+    public async Task SqliteStartedQuarantineSurvivesNewAuditContextUntilNewDiagnosticRun()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<WindowsDoctorDbContext>().UseSqlite(connection).Options;
+        var proposal = CreateProposal();
+        var firstConsent = RepairConsent.Confirm(proposal);
+        var now = DateTimeOffset.UtcNow;
+
+        RepairHistoryRecord Attempt(Guid id, RepairProposal plan, RepairConsent consent) => new(
+            id, plan.Id, plan.Title, RepairExecutionStatus.Prepared, plan.Risk, true, false, now, now, "prepared")
+        {
+            Action = RepairAction.Execute,
+            ConsentId = consent.ConsentId,
+            PlanFingerprint = consent.PlanFingerprint,
+            DiagnosticRunId = plan.DiagnosticRunId,
+            EvidenceGeneration = plan.EvidenceGeneration,
+            FindingIdentity = plan.FindingIdentity,
+            RuleId = plan.RuleId,
+            RuleVersion = plan.RuleVersion,
+            EvidenceFingerprint = plan.EvidenceFingerprint,
+            RedactedEvidence = plan.RedactedEvidence,
+            StructuredPostconditions = plan.StructuredPostconditions,
+            PostconditionResults = [new RepairConditionResult(
+                RepairConditionKind.SimulationCompletedWithoutSystemChanges, RepairConditionStatus.Verified)],
+            PostconditionStatus = RepairPostconditionStatus.Verified
+        };
+
+        await using (var firstContext = new WindowsDoctorDbContext(options))
+        {
+            await firstContext.Database.EnsureCreatedAsync();
+            await WindowsDoctorDatabaseMigrator.MigrateAsync(firstContext);
+            var firstAudit = new SqliteRepairAuditLog(firstContext);
+            var prepared = Attempt(Guid.NewGuid(), proposal, firstConsent);
+            Assert.Equal(RepairConsentAttemptStatus.Saved,
+                (await firstAudit.TrySaveConsentAttemptAsync(prepared)).Status);
+            Assert.True(await firstAudit.TryMarkStartedAsync(prepared with
+            {
+                Status = RepairExecutionStatus.Started,
+                ExecutionStarted = true,
+                CompletedAtUtc = DateTimeOffset.UtcNow,
+                Details = "started"
+            }));
+        }
+
+        await using var restartedContext = new WindowsDoctorDbContext(options);
+        var restartedAudit = new SqliteRepairAuditLog(restartedContext);
+        var secondConsent = RepairConsent.Confirm(proposal);
+        var blocked = await restartedAudit.TrySaveConsentAttemptAsync(Attempt(Guid.NewGuid(), proposal, secondConsent));
+
+        Assert.Equal(RepairConsentAttemptStatus.Quarantined, blocked.Status);
+        Assert.Equal(RepairExecutionStatus.Declined, blocked.Record!.Status);
+        Assert.Equal(1, await restartedContext.RepairStartedPlanQuarantines.CountAsync());
+
+        var newDiagnostic = proposal with { DiagnosticRunId = Guid.NewGuid() };
+        var freshConsent = RepairConsent.Confirm(newDiagnostic);
+        var fresh = await restartedAudit.TrySaveConsentAttemptAsync(Attempt(Guid.NewGuid(), newDiagnostic, freshConsent));
+        Assert.Equal(RepairConsentAttemptStatus.Saved, fresh.Status);
     }
 
     private static RepairProposal CreateProposal(bool supportsRollback = false) => new(
@@ -687,8 +939,19 @@ public sealed class RepairEngineTests
     private static RepairEngine CreateEngine(
         IRepairPlugin plugin,
         IRepairAuditLog audit,
-        IRepairPreconditionEvaluator? evaluator = null) => new(
-            [plugin], audit, evaluator ?? new VerifiedPreconditionEvaluator(), new FixtureRepairProposalAllowlist(plugin.Proposal));
+        IRepairPreconditionEvaluator? evaluator = null,
+        IRepairEvidenceGate? evidenceGate = null)
+    {
+        var gate = evidenceGate ?? new RepairEvidenceGate();
+        if (evidenceGate is null)
+        {
+            var lease = gate.AcquireAsync().AsTask().GetAwaiter().GetResult();
+            lease.MarkDiagnosticRunCurrent(plugin.Proposal.DiagnosticRunId, plugin.Proposal.EvidenceGeneration);
+            lease.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        return new RepairEngine([plugin], audit, evaluator ?? new VerifiedPreconditionEvaluator(),
+            new FixtureRepairProposalAllowlist(plugin.Proposal), gate);
+    }
 
     private static RepairPostconditionReport VerifiedSimulationPostconditions() =>
         new(RepairPostconditionStatus.Verified, "Pós-condição simulada verificada.")
@@ -758,30 +1021,94 @@ public sealed class RepairEngineTests
         }
     }
 
+    private sealed class GateRacingPreconditionEvaluator(
+        IRepairEvidenceGate gate,
+        InMemoryRepairAuditLog audit,
+        IReadOnlyList<RepairPlanCondition> conditions) : IRepairPreconditionEvaluator
+    {
+        private int _callCount;
+        private readonly TaskCompletionSource _mutationScheduled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task MutationTask { get; private set; } = Task.CompletedTask;
+
+        public async Task<IReadOnlyList<RepairConditionResult>> EvaluateAsync(
+            RepairProposal proposal,
+            RepairAction action,
+            Guid? relatedRepairExecutionId,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _callCount) == 2)
+            {
+                MutationTask = Task.Run(async () =>
+                {
+                    _mutationScheduled.TrySetResult();
+                    await using var lease = await gate.AcquireAsync(cancellationToken);
+                    Assert.NotEmpty(audit.StartedExecutionIds);
+                    lease.AdvanceGeneration();
+                }, cancellationToken);
+                await _mutationScheduled.Task.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+
+            return conditions.Select(condition => new RepairConditionResult(
+                condition.Kind, RepairConditionStatus.Verified)).ToArray();
+        }
+    }
+
     private sealed class InMemoryRepairAuditLog : IRepairAuditLog
     {
         public List<RepairHistoryRecord> Records { get; } = [];
+        public HashSet<Guid> StartedExecutionIds { get; } = [];
         public bool RejectCancelledWrites { get; init; }
         public bool FailConsentClaim { get; init; }
         public bool FailStartedWrites { get; init; }
+        public bool FailVerifiedTerminalWrites { get; init; }
         private readonly HashSet<Guid> _usedConsentIds = [];
+        private readonly Dictionary<string, Guid> _quarantinedFindings = new(StringComparer.Ordinal);
 
         public Task SaveAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
         {
             if (RejectCancelledWrites) cancellationToken.ThrowIfCancellationRequested();
             if (FailStartedWrites && record.Status == RepairExecutionStatus.Started)
                 throw new IOException("fixture persistence failure");
+            if (FailVerifiedTerminalWrites && record.ExecutionStarted
+                && record.Status is RepairExecutionStatus.Succeeded or RepairExecutionStatus.RolledBack)
+                throw new IOException("fixture terminal persistence failure");
             Records.RemoveAll(existing => existing.RepairExecutionId == record.RepairExecutionId);
             Records.Add(record);
             return Task.CompletedTask;
         }
 
-        public async Task<bool> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+        public async Task<RepairConsentAttemptResult> TrySaveConsentAttemptAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
         {
             if (FailConsentClaim) throw new IOException("fixture prepared persistence failure");
-            if (record.ConsentId is { } consentId && !_usedConsentIds.Add(consentId)) return false;
+            if (record.ConsentId is { } consentId && !_usedConsentIds.Add(consentId))
+                return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Replay);
+            var key = QuarantineKey(record);
+            if (key is not null && _quarantinedFindings.ContainsKey(key))
+            {
+                var blocked = record with
+                {
+                    Status = RepairExecutionStatus.Declined,
+                    ExecutionStarted = false,
+                    CompletedAtUtc = DateTimeOffset.UtcNow,
+                    Details = "Finding em quarentena: tentativa anterior alcançou Started. Execute novo diagnóstico; nenhuma reconciliação automática foi presumida."
+                };
+                await SaveAsync(blocked, cancellationToken).ConfigureAwait(false);
+                return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Quarantined, blocked);
+            }
             await SaveAsync(record, cancellationToken).ConfigureAwait(false);
-            return true;
+            return new RepairConsentAttemptResult(RepairConsentAttemptStatus.Saved, record);
+        }
+
+        public Task<bool> TryMarkStartedAsync(RepairHistoryRecord record, CancellationToken cancellationToken = default)
+        {
+            if (FailStartedWrites) throw new IOException("fixture persistence failure");
+            var key = QuarantineKey(record);
+            if (key is null || _quarantinedFindings.ContainsKey(key)) return Task.FromResult(false);
+            _quarantinedFindings.Add(key, record.RepairExecutionId);
+            StartedExecutionIds.Add(record.RepairExecutionId);
+            Records.RemoveAll(existing => existing.RepairExecutionId == record.RepairExecutionId);
+            Records.Add(record);
+            return Task.FromResult(true);
         }
 
         public Task<IReadOnlyList<RepairHistoryRecord>> GetRecentAsync(int count, CancellationToken cancellationToken = default) =>
@@ -789,6 +1116,11 @@ public sealed class RepairEngineTests
 
         public Task<RepairHistoryRecord?> GetByExecutionIdAsync(Guid repairExecutionId, CancellationToken cancellationToken = default) =>
             Task.FromResult(Records.FirstOrDefault(record => record.RepairExecutionId == repairExecutionId));
+
+        private static string? QuarantineKey(RepairHistoryRecord record) => record.DiagnosticRunId is { } runId
+            && !string.IsNullOrWhiteSpace(record.FindingIdentity)
+            ? $"{runId:D}:{record.FindingIdentity}:{record.Action}"
+            : null;
     }
 
     private sealed class DeterministicRepairPlugin(RepairProposal proposal) : IRepairPlugin

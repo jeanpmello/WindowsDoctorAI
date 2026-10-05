@@ -12,16 +12,26 @@ public sealed class RunComputerInventoryDiagnosticUseCase(
     IDiagnosticEngine diagnosticEngine,
     IDiagnosticRunRepository history,
     IUserSettingsRepository settings,
-    ILogger<RunComputerInventoryDiagnosticUseCase> logger)
+    ILogger<RunComputerInventoryDiagnosticUseCase> logger,
+    IRepairEvidenceGate? evidenceGate = null)
 {
+    private readonly IRepairEvidenceGate _evidenceGate = evidenceGate ?? new RepairEvidenceGate();
+
     public async Task<DiagnosticOutcome> ExecuteAsync(CancellationToken cancellationToken = default)
     {
+        long evidenceGeneration;
+        await using (var lease = await _evidenceGate.AcquireAsync(cancellationToken).ConfigureAwait(false))
+            evidenceGeneration = lease.AdvanceGeneration();
+
         var startedAt = DateTimeOffset.UtcNow;
         var inventory = await inventoryScanner.ScanAsync(cancellationToken).ConfigureAwait(false);
         var report = await diagnosticEngine.RunAsync(cancellationToken).ConfigureAwait(false);
         var completedAt = DateTimeOffset.UtcNow;
         var run = new DiagnosticRun(Guid.NewGuid(), startedAt, completedAt,
-            completedAt - startedAt, inventory, report);
+            completedAt - startedAt, inventory, report)
+        {
+            EvidenceGeneration = evidenceGeneration
+        };
 
         UserSettings preferences;
         try
@@ -41,7 +51,10 @@ public sealed class RunComputerInventoryDiagnosticUseCase(
 
         try
         {
+            await using var lease = await _evidenceGate.AcquireAsync(cancellationToken).ConfigureAwait(false);
             await history.SaveAsync(run, cancellationToken).ConfigureAwait(false);
+            if (lease.CurrentGeneration == evidenceGeneration)
+                lease.MarkDiagnosticRunCurrent(run.Id, evidenceGeneration);
             return new DiagnosticOutcome(run, true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
