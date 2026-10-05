@@ -42,10 +42,14 @@ public sealed class MainWindowNavigationWiringTests
     public void MainWindowLoadsHomeOnceAndMapsEveryDestinationToItsExistingPage()
     {
         var code = ReadFixture("MainWindow.xaml.cs");
+        const string subscription = "_navigationService.Navigated += NavigationService_Navigated";
+        const string initialNavigation = "_navigationService.NavigateTo(\"home\")";
+        var subscriptionIndex = code.IndexOf(subscription, StringComparison.Ordinal);
+        var initialNavigationIndex = code.IndexOf(initialNavigation, StringComparison.Ordinal);
 
-        Assert.Equal(1, CountOccurrences(code, "_navigationService.NavigateTo(\"home\")"));
-        Assert.True(code.IndexOf("_navigationService.Navigated += NavigationService_Navigated", StringComparison.Ordinal)
-            < code.IndexOf("_navigationService.NavigateTo(\"home\")", StringComparison.Ordinal));
+        Assert.Equal(1, CountOccurrences(code, initialNavigation));
+        Assert.True(subscriptionIndex >= 0 && initialNavigationIndex > subscriptionIndex,
+            "A janela deve assinar o evento de navegação antes de carregar a Home uma única vez.");
         Assert.Contains("element.Tag is string route", code, StringComparison.Ordinal);
         Assert.Contains("_navigationService.NavigateTo(route)", code, StringComparison.Ordinal);
         Assert.Contains("\"home\" => _pageScope.ServiceProvider.GetRequiredService<HomePage>()", code, StringComparison.Ordinal);
