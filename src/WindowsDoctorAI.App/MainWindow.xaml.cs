@@ -26,13 +26,16 @@ public sealed partial class MainWindow : Window
 
     private void NavigationButton_Click(object sender, RoutedEventArgs args)
     {
-        if (sender is Button button && button.Tag is string route)
+        if (sender is FrameworkElement element && element.Tag is string route)
             _navigationService.NavigateTo(route);
     }
 
     private void NavigationService_Navigated(object? sender, string route)
     {
         StartupFailureContext.SetStage(StartupFailureStage.MainWindowNavigation);
+        HomeNavigationButton.IsChecked = string.Equals(route, "home", StringComparison.OrdinalIgnoreCase);
+        AboutNavigationButton.IsChecked = string.Equals(route, "about", StringComparison.OrdinalIgnoreCase);
+        SettingsNavigationButton.IsChecked = string.Equals(route, "settings", StringComparison.OrdinalIgnoreCase);
         PageFrame.Content = null;
         _pageScope?.Dispose();
         _pageScope = _services.CreateScope();

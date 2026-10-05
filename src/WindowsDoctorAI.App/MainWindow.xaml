@@ -6,12 +6,12 @@
     <Grid ColumnDefinitions="220,*">
         <StackPanel Grid.Column="0" Padding="12" Spacing="8">
             <TextBlock Text="Windows Doctor AI" FontSize="18" FontWeight="SemiBold" Margin="4,8,4,12" />
-            <Button Content="Inicial" Tag="home" Click="NavigationButton_Click"
-                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
-            <Button Content="Sobre" Tag="about" Click="NavigationButton_Click"
-                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
-            <Button Content="Configurações" Tag="settings" Click="NavigationButton_Click"
-                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" />
+            <RadioButton x:Name="HomeNavigationButton" Content="Inicial" Tag="home"
+                         GroupName="MainNavigation" IsChecked="True" Click="NavigationButton_Click" />
+            <RadioButton x:Name="AboutNavigationButton" Content="Sobre" Tag="about"
+                         GroupName="MainNavigation" Click="NavigationButton_Click" />
+            <RadioButton x:Name="SettingsNavigationButton" Content="Configurações" Tag="settings"
+                         GroupName="MainNavigation" Click="NavigationButton_Click" />
         </StackPanel>
         <Frame x:Name="PageFrame" Grid.Column="1" />
     </Grid>

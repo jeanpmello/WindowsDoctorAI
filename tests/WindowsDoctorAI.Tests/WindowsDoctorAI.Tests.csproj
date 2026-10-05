@@ -25,6 +25,7 @@
   <ItemGroup>
     <Compile Include="../../src/WindowsDoctorAI.App/HomeViewModel.cs" Link="App/HomeViewModel.cs" />
     <Compile Include="../../src/WindowsDoctorAI.App/StartupFailureDetails.cs" Link="App/StartupFailureDetails.cs" />
+    <Compile Include="../../src/WindowsDoctorAI.App/NavigationService.cs" Link="App/NavigationService.cs" />
   </ItemGroup>
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
   <ItemGroup>
@@ -32,5 +33,7 @@
     <None Include="Fixtures/**/*.json" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../packaging/Start-WindowsDoctorAI.cmd" Link="Fixtures/Alpha/Start-WindowsDoctorAI.cmd" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../.github/workflows/alpha-package.yml" Link="Fixtures/Alpha/alpha-package.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/WindowsDoctorAI.App/MainWindow.xaml" Link="Fixtures/App/MainWindow.xaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/WindowsDoctorAI.App/MainWindow.xaml.cs" Link="Fixtures/App/MainWindow.xaml.cs" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
