@@ -69,6 +69,43 @@ public sealed class CbsLogMarkerClassifierTests
     }
 
     [Fact]
+    public void WrongHresultNearMaximumLineRemainsUnclassifiedAndLineLimitIsPreserved()
+    {
+        const int maximumLineCharacters = 4096;
+        const string wrongHresultPrefix = "Error CBS Failed to resolve package '";
+        const string wrongHresultSuffix = "' [HRESULT = 0x800F0831 - OTHER]";
+        var wrongHresultLine = wrongHresultPrefix
+            + new string('p', maximumLineCharacters - wrongHresultPrefix.Length - wrongHresultSuffix.Length)
+            + wrongHresultSuffix;
+        const string validMarker = "Error CBS Failed to resolve package 'pkg' [HRESULT = 0x800F0831 - CBS_E_STORE_CORRUPTION]";
+        var validMarkerAtLimit = validMarker + new string(' ', maximumLineCharacters - validMarker.Length);
+        var classifier = new CbsLogMarkerClassifier();
+
+        Assert.Equal(maximumLineCharacters, wrongHresultLine.Length);
+        Assert.Empty(classifier.Classify(wrongHresultLine + "\n"));
+        Assert.Equal(maximumLineCharacters, validMarkerAtLimit.Length);
+        Assert.Equal([CbsMarkerType.FailedToResolvePackage], classifier.Classify(validMarkerAtLimit + "\n"));
+        Assert.Empty(classifier.Classify(validMarkerAtLimit + " \n"));
+    }
+
+    [Fact]
+    public void ExactTwoMiBInputIsAcceptedAndAnythingLargerIsRejected()
+    {
+        const int maximumLineCharacters = 4096;
+        const string marker = "Info CBS Store corruption, manifest missing for package: bounded";
+        var firstLine = marker + new string(' ', maximumLineCharacters - 1 - marker.Length) + "\n";
+        var fillerLine = new string('x', maximumLineCharacters - 1) + "\n";
+        var remainingCharacters = CbsLogMarkerClassifier.MaximumInputCharacters - firstLine.Length;
+        Assert.Equal(0, remainingCharacters % fillerLine.Length);
+        var text = firstLine + string.Concat(Enumerable.Repeat(fillerLine, remainingCharacters / fillerLine.Length));
+        var classifier = new CbsLogMarkerClassifier();
+
+        Assert.Equal(CbsLogMarkerClassifier.MaximumInputCharacters, text.Length);
+        Assert.Equal([CbsMarkerType.ManifestMissing], classifier.Classify(text));
+        Assert.Empty(classifier.Classify(text + "\n"));
+    }
+
+    [Fact]
     public void TruncatedMalformedOversizedOrControlCharacterInputReturnsNoMarker()
     {
         var classifier = new CbsLogMarkerClassifier();
