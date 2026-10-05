@@ -38,12 +38,13 @@ public sealed class StartupFailureDiagnosticsTests
     }
 
     [Theory]
-    [InlineData(StartupFailureStage.MainWindowXamlLoading, "Carregar XAML de MainWindow")]
-    [InlineData(StartupFailureStage.HomePageCreation, "Criar HomePage")]
-    [InlineData(StartupFailureStage.HomePageNavigation, "Navegar para HomePage")]
-    [InlineData(StartupFailureStage.MainWindowActivation, "Ativar MainWindow")]
-    public void OnLaunchedUsesFixedLabelForTheExactStartupStage(StartupFailureStage stage, string expectedLabel)
+    [InlineData(nameof(StartupFailureStage.MainWindowXamlLoading), "Carregar XAML de MainWindow")]
+    [InlineData(nameof(StartupFailureStage.HomePageCreation), "Criar HomePage")]
+    [InlineData(nameof(StartupFailureStage.HomePageNavigation), "Navegar para HomePage")]
+    [InlineData(nameof(StartupFailureStage.MainWindowActivation), "Ativar MainWindow")]
+    public void OnLaunchedUsesFixedLabelForTheExactStartupStage(string stageName, string expectedLabel)
     {
+        var stage = Enum.Parse<StartupFailureStage>(stageName, ignoreCase: false);
         var details = StartupFailureDetails.ForOnLaunched(CreateSensitiveException(), stage);
 
         Assert.Equal(expectedLabel, details.Stage);

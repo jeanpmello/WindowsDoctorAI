@@ -40,7 +40,7 @@ public sealed partial class MainWindow : Window
         if (string.Equals(route, "home", StringComparison.OrdinalIgnoreCase))
             StartupFailureContext.SetStage(StartupFailureStage.HomePageCreation);
 
-        var page = route switch
+        Page page = route switch
         {
             "home" => _pageScope.ServiceProvider.GetRequiredService<HomePage>(),
             "about" => _pageScope.ServiceProvider.GetRequiredService<AboutPage>(),
