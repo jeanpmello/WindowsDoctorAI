@@ -1,5 +1,8 @@
 using System.Text;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 using WindowsDoctorAI.Core;
 
 namespace WindowsDoctorAI.App;
@@ -61,8 +64,12 @@ internal static class XamlSmokeTestRunner
             if (DispatcherQueue.GetForCurrentThread() is null)
                 throw new InvalidOperationException("A thread de inicialização não possui DispatcherQueue WinUI.");
 
-            ReportStage("XamlProbe: construindo uma Window vazia");
-            _ = new XamlProbeWindow();
+            ReportStage("XamlProbe: criando Window em código");
+            _ = new Window();
+
+            ReportStage("XamlProbe: carregando Grid em memória");
+            if (XamlReader.Load("<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" />") is not Grid)
+                throw new InvalidOperationException("O parser XAML não produziu o controle Grid esperado.");
 
             ReportStage("MainWindow: construindo a janela e carregando XAML");
             var navigationService = new InertNavigationService();
@@ -72,7 +79,7 @@ internal static class XamlSmokeTestRunner
                 throw new InvalidOperationException("MainWindow não solicitou exatamente uma navegação inicial.");
 
             Complete(
-                "PASS: MainWindow foi construída na thread UI/STA do WinUI; InitializeComponent() concluiu; a navegação foi inerte; a janela não foi ativada; nenhum serviço real foi resolvido.",
+                "PASS: Window e Grid XAML em memória foram criados; MainWindow foi construída na thread UI/STA do WinUI; InitializeComponent() concluiu; a navegação foi inerte; nenhuma janela foi ativada e nenhum serviço real foi resolvido.",
                 0);
         }
         catch (Exception exception)
