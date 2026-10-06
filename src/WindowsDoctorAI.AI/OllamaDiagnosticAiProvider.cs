@@ -36,6 +36,11 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
 
     public async Task<AiProviderAvailability> CheckAvailabilityAsync(CancellationToken cancellationToken = default)
     {
+        if (!_options.Enabled)
+        {
+            return new AiProviderAvailability(false, "A análise por IA está desligada nas configurações.");
+        }
+
         if (!TryGetBaseUri(out var baseUri, out var configurationProblem))
         {
             return new AiProviderAvailability(false, configurationProblem);
@@ -71,6 +76,14 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
         catch (OperationCanceledException)
         {
             return new AiProviderAvailability(false, "O Ollama não respondeu a tempo. Verifique se ele está em execução.");
+        }
+        catch (InvalidDataException)
+        {
+            return new AiProviderAvailability(false, "A resposta do Ollama ao listar modelos excedeu o limite de tamanho.");
+        }
+        catch (DecoderFallbackException)
+        {
+            return new AiProviderAvailability(false, "Resposta inesperada do Ollama ao listar modelos.");
         }
         catch (HttpRequestException)
         {
@@ -112,8 +125,12 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
         try
         {
             using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/chat"))
+            {
+                Content = content
+            };
             using var response = await _httpClient
-                .PostAsync(new Uri(baseUri, "api/chat"), content, timeout.Token)
+                .SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
@@ -157,6 +174,10 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
         {
             return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse, "A resposta do Ollama excedeu o limite de tamanho.");
         }
+        catch (DecoderFallbackException)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse, "O Ollama devolveu uma resposta em formato inválido.", Model: _options.Model);
+        }
     }
 
     internal static bool IsModelInstalled(IReadOnlyCollection<string> installed, string model)
@@ -175,16 +196,28 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
         try
         {
             using var document = JsonDocument.Parse(json);
-            if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("models", out var models)
+                || models.ValueKind != JsonValueKind.Array)
             {
                 return null;
             }
 
-            return models.EnumerateArray()
-                .Select(item => item.TryGetProperty("name", out var name) ? name.GetString() : null)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!)
-                .ToArray();
+            var names = new List<string>();
+            foreach (var item in models.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object
+                    || !item.TryGetProperty("name", out var name)
+                    || name.ValueKind != JsonValueKind.String
+                    || string.IsNullOrWhiteSpace(name.GetString()))
+                {
+                    return null;
+                }
+
+                names.Add(name.GetString()!);
+            }
+
+            return names;
         }
         catch (JsonException)
         {
@@ -197,12 +230,13 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
         try
         {
             using var document = JsonDocument.Parse(json);
-            return document.RootElement.TryGetProperty("message", out var message)
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("message", out var message)
                 && message.ValueKind == JsonValueKind.Object
                 && message.TryGetProperty("content", out var content)
                 && content.ValueKind == JsonValueKind.String
-                    ? content.GetString()
-                    : null;
+                ? content.GetString()
+                : null;
         }
         catch (JsonException)
         {
@@ -236,11 +270,18 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
 
     private static async Task<string> ReadBoundedAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
+        if (response.Content.Headers.ContentLength is > MaxResponseBytes)
+        {
+            throw new InvalidDataException("Resposta acima do limite.");
+        }
+
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var buffer = new MemoryStream();
         var chunk = new byte[8192];
         int read;
-        while ((read = await stream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+        while ((read = await stream.ReadAsync(
+                   chunk.AsMemory(0, (int)Math.Min(chunk.Length, MaxResponseBytes - buffer.Length + 1)),
+                   cancellationToken).ConfigureAwait(false)) > 0)
         {
             if (buffer.Length + read > MaxResponseBytes)
             {
@@ -250,6 +291,6 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
             buffer.Write(chunk, 0, read);
         }
 
-        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+        return new UTF8Encoding(false, true).GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 }

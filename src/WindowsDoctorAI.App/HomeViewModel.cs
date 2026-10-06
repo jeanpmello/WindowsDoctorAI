@@ -100,6 +100,13 @@ internal partial class HomeViewModel(
         ConsentToRepairPlanCommand.NotifyCanExecuteChanged();
         UpdateImportCommandState();
         UpdateCbsLogCommandState();
+        if (value)
+        {
+            CancelAiForContextChange("Análise cancelada porque um novo diagnóstico está em andamento.");
+        }
+
+        SetCanAnalyze(_currentRun is not null);
+        AnalyzeWithAiCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnIsAnalyzingCbsLogChanged(bool value) => UpdateCbsLogCommandState();
@@ -429,6 +436,7 @@ internal partial class HomeViewModel(
         try
         {
             var outcome = await runDiagnostic.ExecuteAsync();
+            CancelAiForContextChange();
             _currentRun = outcome.Run;
             _displayedRunIsPrevious = false;
             await RefreshManualGuidanceAsync(outcome.Run);
@@ -478,6 +486,7 @@ internal partial class HomeViewModel(
             var latest = await history.GetLatestAsync(cancellationToken);
             if (latest is null)
             {
+                CancelAiForContextChange();
                 _currentRun = null;
                 _displayedRunIsPrevious = false;
                 RefreshAiState();
@@ -488,6 +497,7 @@ internal partial class HomeViewModel(
                 StatusMessage = "Nenhum diagnóstico anterior encontrado no histórico local. Execute um diagnóstico para ver resultados.";
                 return;
             }
+            CancelAiForContextChange();
             _currentRun = latest;
             _displayedRunIsPrevious = false;
             await RefreshManualGuidanceAsync(latest, cancellationToken);
