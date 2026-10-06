@@ -132,7 +132,7 @@ jobs:
         run: |
           $packageDir = Join-Path $env:RUNNER_TEMP 'wdai-alpha-package'
           $exe = Join-Path $packageDir 'WindowsDoctorAI.App.exe'
-          $resultPath = Join-Path $env:RUNNER_TEMP 'WindowsDoctorAI-xaml-smoke-ci.txt'
+          $resultPath = Join-Path $env:TEMP 'WindowsDoctorAI-xaml-smoke-ci.txt'
           if (Test-Path $resultPath) { Remove-Item -Path $resultPath -Force }
 
           $process = Start-Process -FilePath $exe `
