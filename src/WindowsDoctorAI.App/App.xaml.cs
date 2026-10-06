@@ -43,8 +43,13 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                     configuration.AddEnvironmentVariables(prefix: "WINDOWSDOCTORAI_");
                 })
                 .ConfigureLogging((_, logging) => logging.AddDebug())
-                .ConfigureServices((_, services) =>
+                .ConfigureServices((context, services) =>
                 {
+                    var ollamaOptions = context.Configuration.GetSection(OllamaOptions.SectionName).Get<OllamaOptions>() ?? new OllamaOptions();
+                    services.AddSingleton(ollamaOptions);
+                    services.AddSingleton<IDiagnosticAiProvider>(provider => new OllamaDiagnosticAiProvider(
+                        OllamaDiagnosticAiProvider.CreateHttpClient(),
+                        provider.GetRequiredService<OllamaOptions>()));
                     services.AddComputerInventoryDiagnostics();
                     services.AddWindowsDoctorInfrastructure(databasePath);
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();

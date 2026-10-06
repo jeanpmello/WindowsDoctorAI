@@ -12,6 +12,7 @@ Mudanças relevantes do Windows Doctor AI.
 
 ### Added
 
+- Análise por IA local via Ollama (`WindowsDoctorAI.AI`): provedor restrito a loopback, prompt montado a partir da execução redigida com limites de tamanho, prévia do texto enviado na UI, cancelamento, e tratamento de Ollama ausente/modelo não instalado/timeout. Sem execução de ações a partir da resposta.
 - Modelo declarativo de conhecimento com versões de regras, erros, sintomas, causas, soluções, impacto e referências.
 - Importador JSON estrito e limitado; regras permanecem inertes, e o SHA-256 serve à identificação/idempotência, não à autenticação da origem.
 - Schema SQLite versionado por `PRAGMA user_version`, compatível com bancos dos Milestones 1–2.

@@ -2,6 +2,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using WindowsDoctorAI.AI;
 using WindowsDoctorAI.Application;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Domain;
@@ -20,8 +21,10 @@ internal partial class HomeViewModel(
     IBackupSetCatalogSource backupSetCatalogSource,
     ILogger<HomeViewModel> logger,
     RepairProposalBuilder? repairProposalBuilder = null,
-    RepairEngine? repairEngine = null) : ObservableObject
+    RepairEngine? repairEngine = null,
+    IDiagnosticAiProvider? aiProvider = null) : ObservableObject
 {
+    private readonly IDiagnosticAiProvider? _aiProvider = aiProvider;
     private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
     private static readonly string[] DashboardCategories = ["Sistema", "Drivers", "Hardware", "Rede", "Segurança"];
 
@@ -420,6 +423,7 @@ internal partial class HomeViewModel(
         ResetCbsLogAnalysis("A observação CBS é independente do diagnóstico e não será associada a evento algum.");
         UpdateCbsLogCommandState();
         _displayedRunIsPrevious = _currentRun is not null;
+        ClearAiAnswer();
         IsScanning = true;
         StatusMessage = "Coletando inventário e verificações locais somente de leitura. Nenhuma correção será aplicada.";
         try
@@ -431,6 +435,7 @@ internal partial class HomeViewModel(
             await RefreshRepairProposalsAsync(outcome.Run);
             UpdateCbsLogCommandState();
             CanExportHtmlReport = true;
+            RefreshAiState();
             DisplayInventory(outcome.Run.Inventory);
             DisplayReport(outcome.Run.Report, outcome.Run.Duration, outcome.Run.Inventory);
             LastDiagnosticText = $"Concluído às {outcome.Run.CompletedAtUtc.ToLocalTime():G}";
@@ -475,6 +480,7 @@ internal partial class HomeViewModel(
             {
                 _currentRun = null;
                 _displayedRunIsPrevious = false;
+                RefreshAiState();
                 ManualGuidanceStatus = "Nenhuma execução diagnóstica carregada para avaliar orientações manuais.";
                 RepairProposalStatus = "Nenhum plano disponível: não há uma execução diagnóstica atual salva para revalidar.";
                 LastDiagnosticText = "Nenhum diagnóstico anterior encontrado no histórico local.";
@@ -487,6 +493,7 @@ internal partial class HomeViewModel(
             await RefreshManualGuidanceAsync(latest, cancellationToken);
             await RefreshRepairProposalsAsync(latest, cancellationToken);
             CanExportHtmlReport = true;
+            RefreshAiState();
             DisplayInventory(latest.Inventory);
             DisplayReport(latest.Report, latest.Duration, latest.Inventory);
             LastDiagnosticText = $"Concluído às {latest.CompletedAtUtc.ToLocalTime():G}";
