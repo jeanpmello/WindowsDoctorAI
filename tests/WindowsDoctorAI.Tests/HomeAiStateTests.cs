@@ -27,10 +27,24 @@ public sealed class HomeAiStateTests
         public Task<int> DeleteAllAsync(CancellationToken cancellationToken = default) => Task.FromResult(0);
     }
 
-    private sealed class TestKnowledgeRepository : IKnowledgeRepository
+    private sealed class TestKnowledgeRepository(IReadOnlyList<KnowledgeRule>? rules = null) : IKnowledgeRepository
     {
+        public TaskCompletionSource<bool>? ProvenanceReadStarted { get; set; }
+        public TaskCompletionSource<bool>? ProvenanceReadGate { get; set; }
+
         public Task<IReadOnlyList<KnowledgeRule>> GetLatestRulesAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<KnowledgeRule>>(Array.Empty<KnowledgeRule>());
+            Task.FromResult(rules ?? (IReadOnlyList<KnowledgeRule>)Array.Empty<KnowledgeRule>());
+
+        public async Task<IReadOnlyList<KnowledgeRuleProvenance>> GetLatestRuleProvenanceAsync(CancellationToken cancellationToken = default)
+        {
+            if (ProvenanceReadGate is { } gate)
+            {
+                ProvenanceReadStarted?.TrySetResult(true);
+                await gate.Task.WaitAsync(cancellationToken);
+            }
+
+            return Array.Empty<KnowledgeRuleProvenance>();
+        }
 
         public Task SaveImportAsync(KnowledgePackage package, string sha256, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
@@ -76,6 +90,27 @@ public sealed class HomeAiStateTests
 
         public Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(new AiAnalysisResult(AiAnalysisStatus.Completed, "ok", "resposta", "test-model"));
+    }
+
+    private sealed class CapturingAiProvider : IDiagnosticAiProvider
+    {
+        public AiAnalysisRequest? LastRequest { get; private set; }
+        public int AvailabilityCount { get; private set; }
+        public int AnalysisCount { get; private set; }
+        public string Name => "capture";
+
+        public Task<AiProviderAvailability> CheckAvailabilityAsync(CancellationToken cancellationToken = default)
+        {
+            AvailabilityCount++;
+            return Task.FromResult(new AiProviderAvailability(true, "ready", "test-model"));
+        }
+
+        public Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisRequest request, CancellationToken cancellationToken = default)
+        {
+            AnalysisCount++;
+            LastRequest = request;
+            return Task.FromResult(new AiAnalysisResult(AiAnalysisStatus.Completed, "ok", "resposta", "test-model"));
+        }
     }
 
     private sealed class NoCbsLogPicker : ICbsLogFilePicker
@@ -131,9 +166,106 @@ public sealed class HomeAiStateTests
         Assert.True(viewModel.AnalyzeWithAiCommand.CanExecute(null));
     }
 
-    private static HomeViewModel CreateViewModel(TestHistory history, IDiagnosticEngine engine, IDiagnosticAiProvider provider)
+    [Fact]
+    public async Task Preview_and_Analyze_use_the_same_manual_guidance_prompt_snapshot()
     {
-        var knowledge = new TestKnowledgeRepository();
+        var now = FixedNow;
+        var finding = new DiagnosticResult(
+            "Windows Update", "Sistema", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
+            "Falha observada 0xABCD1234", "Evidência sintética 0xABCD1234", "Revisão manual",
+            "Evento 0xABCD1234", TimeSpan.Zero, now);
+        var run = new DiagnosticRun(
+            Guid.NewGuid(), now, now, TimeSpan.Zero, new ComputerInventory(),
+            new DiagnosticReport([finding], now, now, TimeSpan.Zero, new HealthScore(75)));
+        var rule = new KnowledgeRule(
+            "fixture.preview", 3, "Fixture", "Regra de prévia", KnowledgeImpact.Moderate,
+            ["0xABCD1234"], [], [], ["Orientação declarada; revisão humana."],
+            [new KnowledgeReference("Manual", "https://docs.example.test/preview")],
+            "Aplicabilidade declarada; não verificada automaticamente.",
+            Procedure: new KnowledgeProcedure(
+                "Revise o achado.", "Decida manualmente se a orientação se aplica.",
+                "Conta padrão", false, "Risco declarado moderado", "Confira backup",
+                "Rollback não declarado", "Fonte não verificada", false, true, true));
+        var history = new TestHistory { LatestRun = run };
+        var provider = new CapturingAiProvider();
+        var viewModel = CreateViewModel(history, new CompletedDiagnosticEngine(run.Report!), provider, [rule]);
+
+        await viewModel.LoadLatestAsync();
+        var preview = viewModel.AiPromptPreview;
+        Assert.Contains("fixture.preview · v3", preview);
+        Assert.Contains("https://docs.example.test/preview", preview);
+
+        await viewModel.AnalyzeWithAiCommand.ExecuteAsync(null);
+
+        var sent = Assert.IsType<AiAnalysisRequest>(provider.LastRequest);
+        var expectedPreview = $"[Instruções ao modelo]\n{sent.SystemPrompt}\n\n[Dados do diagnóstico e orientações ManualOnly (identificadores conhecidos redigidos; fontes não autenticadas)]\n{sent.UserPrompt}";
+        Assert.Equal(expectedPreview, preview);
+        Assert.Contains("fixture.preview · v3", sent.UserPrompt);
+        Assert.Contains("Recebidas: 1; incluídas: 1; omitidas: 0", sent.UserPrompt);
+    }
+
+    [Fact]
+    public async Task Loading_history_invalidates_ai_until_the_new_run_guidance_projection_is_complete()
+    {
+        var oldRun = CreateFindingRun(Guid.NewGuid(), "0x11112222");
+        var newRun = CreateFindingRun(Guid.NewGuid(), "0x33334444");
+        var oldRule = CreateRule("fixture.old", "0x11112222");
+        var newRule = CreateRule("fixture.new", "0x33334444");
+        var history = new TestHistory { LatestRun = oldRun };
+        var knowledge = new TestKnowledgeRepository([oldRule, newRule]);
+        var provider = new CapturingAiProvider();
+        var viewModel = CreateViewModel(
+            history,
+            new CompletedDiagnosticEngine(oldRun.Report!),
+            provider,
+            knowledgeRepository: knowledge);
+
+        await viewModel.LoadLatestAsync();
+        Assert.Contains("fixture.old · v1", viewModel.AiPromptPreview);
+        Assert.True(viewModel.AnalyzeWithAiCommand.CanExecute(null));
+
+        var provenanceReadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseProvenanceRead = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        knowledge.ProvenanceReadStarted = provenanceReadStarted;
+        knowledge.ProvenanceReadGate = releaseProvenanceRead;
+        history.LatestRun = newRun;
+
+        var loading = viewModel.LoadLatestAsync();
+        await provenanceReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.True(viewModel.IsLoadingHistory);
+        Assert.Empty(viewModel.AiPromptPreview);
+        Assert.False(viewModel.CanAnalyzeWithAi);
+        Assert.False(viewModel.AnalyzeWithAiCommand.CanExecute(null));
+        await viewModel.AnalyzeWithAiCommand.ExecuteAsync(null);
+        Assert.Equal(0, provider.AvailabilityCount);
+        Assert.Equal(0, provider.AnalysisCount);
+        Assert.Null(provider.LastRequest);
+
+        releaseProvenanceRead.TrySetResult(true);
+        await loading.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.False(viewModel.IsLoadingHistory);
+        Assert.Contains("fixture.new · v1", viewModel.AiPromptPreview);
+        Assert.DoesNotContain("fixture.old · v1", viewModel.AiPromptPreview);
+        Assert.True(viewModel.AnalyzeWithAiCommand.CanExecute(null));
+        await viewModel.AnalyzeWithAiCommand.ExecuteAsync(null);
+
+        var sent = Assert.IsType<AiAnalysisRequest>(provider.LastRequest);
+        Assert.Contains("fixture.new · v1", sent.UserPrompt);
+        Assert.DoesNotContain("fixture.old · v1", sent.UserPrompt);
+        Assert.Equal(1, provider.AvailabilityCount);
+        Assert.Equal(1, provider.AnalysisCount);
+    }
+
+    private static HomeViewModel CreateViewModel(
+        TestHistory history,
+        IDiagnosticEngine engine,
+        IDiagnosticAiProvider provider,
+        IReadOnlyList<KnowledgeRule>? rules = null,
+        TestKnowledgeRepository? knowledgeRepository = null)
+    {
+        var knowledge = knowledgeRepository ?? new TestKnowledgeRepository(rules);
         var useCase = new RunComputerInventoryDiagnosticUseCase(
             new TestInventoryScanner(), engine, history, new TestSettingsRepository(),
             NullLogger<RunComputerInventoryDiagnosticUseCase>.Instance);
@@ -148,6 +280,26 @@ public sealed class HomeAiStateTests
 
     private static DiagnosticRun CreateRun() => new(
         Guid.NewGuid(), FixedNow, FixedNow, TimeSpan.Zero, new ComputerInventory(), CreateReport());
+
+    private static DiagnosticRun CreateFindingRun(Guid id, string errorCode)
+    {
+        var finding = new DiagnosticResult(
+            "Windows Update", "Sistema", DiagnosticSeverity.Warning, DiagnosticStatus.Finding,
+            $"Falha observada {errorCode}", "Evidência sintética", "Revisão manual",
+            $"Evento {errorCode}", TimeSpan.Zero, FixedNow);
+        var report = new DiagnosticReport([finding], FixedNow, FixedNow, TimeSpan.Zero, new HealthScore(75));
+        return new DiagnosticRun(id, FixedNow, FixedNow, TimeSpan.Zero, new ComputerInventory(), report);
+    }
+
+    private static KnowledgeRule CreateRule(string id, string errorCode) => new(
+        id, 1, "Fixture", id, KnowledgeImpact.Moderate,
+        [errorCode], [], [], ["Orientação declarada; revisão humana."],
+        [new KnowledgeReference("Manual", $"https://docs.example.test/{id}")],
+        "Aplicabilidade declarada; não verificada automaticamente.",
+        Procedure: new KnowledgeProcedure(
+            "Revise o achado.", "Decida manualmente se a orientação se aplica.",
+            "Conta padrão", false, "Risco moderado", "Confira backup",
+            "Rollback não declarado", "Fonte não verificada", false, true, true));
 
     private static DiagnosticReport CreateReport() => new(
         Array.Empty<DiagnosticResult>(), FixedNow, FixedNow, TimeSpan.Zero, new HealthScore(75));

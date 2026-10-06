@@ -459,6 +459,7 @@ internal partial class HomeViewModel(
                 : "A tentativa mais recente falhou; nenhum diagnóstico concluído está carregado nesta sessão.";
             ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
             ManualGuidanceStatus = "Avaliação incompleta: a nova execução diagnóstica falhou. Nenhuma conclusão sobre a condição do computador foi produzida.";
+            RefreshAiState();
             StatusMessage = DiagnosticPrivacyMessages.DiagnosticFailure(exception);
         }
         finally

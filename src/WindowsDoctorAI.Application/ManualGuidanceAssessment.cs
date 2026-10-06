@@ -1,7 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using WindowsDoctorAI.Domain;
 
 namespace WindowsDoctorAI.Application;
@@ -45,7 +42,7 @@ public static class ManualGuidanceProjector
         var safeFindings = findings.Select(finding =>
         {
             var safeFinding = RedactFinding(finding.Finding, redactionInventory);
-            return (Assessment: finding, Finding: safeFinding, Identity: BuildFindingIdentity(run.Id, safeFinding));
+            return (Assessment: finding, Finding: safeFinding, Identity: DiagnosticFindingIdentity.Create(safeFinding));
         }).ToArray();
         var duplicateIdentities = safeFindings
             .GroupBy(item => item.Identity, StringComparer.Ordinal)
@@ -53,6 +50,7 @@ public static class ManualGuidanceProjector
             .Select(group => group.Key)
             .ToHashSet(StringComparer.Ordinal);
         var projectedFindings = safeFindings.Select(item => ProjectFinding(
+            run.Id,
             item.Assessment,
             item.Finding,
             item.Identity,
@@ -138,6 +136,7 @@ public static class ManualGuidanceProjector
     }
 
     private static ManualGuidanceFinding ProjectFinding(
+        Guid diagnosticRunId,
         ManualRecommendationFindingAssessment finding,
         DiagnosticResult safeFinding,
         string findingIdentity,
@@ -181,7 +180,7 @@ public static class ManualGuidanceProjector
             : $"Provider estruturado (allowlist): {provider}";
         return new ManualGuidanceFinding(
             runReference,
-            $"Identidade estável nesta execução: {findingIdentity}",
+            $"Identidade estável nesta execução: f1-{findingIdentity[..24]} · run {diagnosticRunId:N}",
             findingHeading,
             isAmbiguousDuplicate,
             evidence,
@@ -189,7 +188,11 @@ public static class ManualGuidanceProjector
             status,
             statusText,
             candidates,
-            incomplete);
+            incomplete)
+        {
+            DiagnosticRunId = diagnosticRunId,
+            FindingIdentity = findingIdentity
+        };
     }
 
     private static ManualGuidanceRecommendation ProjectRecommendation(
@@ -317,27 +320,6 @@ public static class ManualGuidanceProjector
         var timestamp = finding.Timestamp;
         var report = new DiagnosticReport([finding], timestamp, timestamp, TimeSpan.Zero, null);
         return DiagnosticPrivacyRedactor.RedactReport(report, inventory)!.Results[0];
-    }
-
-    private static string BuildFindingIdentity(Guid runId, DiagnosticResult finding)
-    {
-        var canonicalFinding = JsonSerializer.Serialize(new
-        {
-            RunId = runId.ToString("N"),
-            TimestampUtcTicks = finding.Timestamp.ToUniversalTime().UtcDateTime.Ticks,
-            DurationTicks = finding.Duration.Ticks,
-            Scanner = finding.ScannerName,
-            Category = finding.Category,
-            Status = finding.Status.ToString(),
-            Severity = finding.Severity.ToString(),
-            Title = finding.Title,
-            Description = finding.Description,
-            Evidence = finding.Evidence,
-            Recommendation = finding.Recommendation,
-            Provider = DiagnosticSourceMetadata.NormalizeProvider(finding.SourceMetadata?.Provider)
-        });
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalFinding))).ToLowerInvariant();
-        return $"f1-{hash[..24]}";
     }
 
     private static string FormatRunReference(DiagnosticRun run) =>

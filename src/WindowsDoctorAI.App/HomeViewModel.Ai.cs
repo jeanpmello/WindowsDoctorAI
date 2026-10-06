@@ -10,7 +10,10 @@ internal partial class HomeViewModel
 {
     private const string AiIdleStatus = "Execute ou carregue um diagnóstico para habilitar a análise por IA local.";
 
+    private sealed record AiPromptSnapshot(DiagnosticRun Run, AiAnalysisRequest Request);
+
     private CancellationTokenSource? _aiCancellation;
+    private AiPromptSnapshot? _aiPromptSnapshot;
     private int _aiOperationId;
 
     [ObservableProperty] private string _aiStatusText = AiIdleStatus;
@@ -19,11 +22,12 @@ internal partial class HomeViewModel
     [ObservableProperty] private bool _isAnalyzingWithAi;
     [ObservableProperty] private bool _canAnalyzeWithAi;
 
-    /// <summary>Chamado sempre que a execução atual muda; recalcula a prévia exata do que seria enviado ao modelo.</summary>
+    /// <summary>Chamado sempre que a execução atual muda; calcula e guarda a requisição exata exibida na prévia.</summary>
     internal void RefreshAiState()
     {
         CancelAiForContextChange();
         ClearAiAnswer();
+        _aiPromptSnapshot = null;
         if (_aiProvider is null)
         {
             AiPromptPreview = string.Empty;
@@ -32,7 +36,8 @@ internal partial class HomeViewModel
             return;
         }
 
-        if (_currentRun is null)
+        var run = _currentRun;
+        if (run is null)
         {
             AiPromptPreview = string.Empty;
             AiStatusText = AiIdleStatus;
@@ -40,8 +45,10 @@ internal partial class HomeViewModel
             return;
         }
 
-        var request = DiagnosticPromptBuilder.Build(_currentRun);
-        AiPromptPreview = $"[Instruções ao modelo]\n{request.SystemPrompt}\n\n[Dados do diagnóstico (identificadores conhecidos redigidos)]\n{request.UserPrompt}";
+        var guidanceSnapshot = ManualGuidanceFindings.ToArray();
+        var request = DiagnosticPromptBuilder.Build(run, guidanceSnapshot);
+        _aiPromptSnapshot = new AiPromptSnapshot(run, request);
+        AiPromptPreview = $"[Instruções ao modelo]\n{request.SystemPrompt}\n\n[Dados do diagnóstico e orientações ManualOnly (identificadores conhecidos redigidos; fontes não autenticadas)]\n{request.UserPrompt}";
         AiStatusText = $"Pronto. {request.TotalCharacters:N0} caracteres serão enviados pelo app ao endpoint Ollama configurado em loopback neste computador.";
         SetCanAnalyze(true);
     }
@@ -50,7 +57,14 @@ internal partial class HomeViewModel
 
     private void SetCanAnalyze(bool value)
     {
-        CanAnalyzeWithAi = value && !IsAnalyzingWithAi && !IsScanning;
+        CanAnalyzeWithAi = value
+            && _aiProvider is not null
+            && _currentRun is not null
+            && _aiPromptSnapshot is not null
+            && ReferenceEquals(_aiPromptSnapshot.Run, _currentRun)
+            && !IsAnalyzingWithAi
+            && !IsScanning
+            && !IsLoadingHistory;
         AnalyzeWithAiCommand.NotifyCanExecuteChanged();
     }
 
@@ -67,20 +81,50 @@ internal partial class HomeViewModel
         }
     }
 
-    private bool CanRunAiAnalysis() => _aiProvider is not null && _currentRun is not null && !IsAnalyzingWithAi && !IsScanning;
+    partial void OnIsLoadingHistoryChanged(bool value)
+    {
+        if (value)
+        {
+            CancelAiForContextChange("Análise cancelada porque o histórico está sendo carregado.");
+            _aiPromptSnapshot = null;
+            AiPromptPreview = string.Empty;
+            ClearAiAnswer();
+            AiStatusText = "Análise de IA indisponível enquanto o histórico está sendo carregado.";
+        }
+        else if (_aiPromptSnapshot is null)
+        {
+            AiStatusText = _currentRun is null
+                ? AiIdleStatus
+                : "Análise desabilitada: não há um snapshot válido para a execução carregada.";
+        }
 
-    private bool IsCurrentAiOperation(int operationId, DiagnosticRun run, CancellationTokenSource cancellation) =>
+        SetCanAnalyze(_currentRun is not null);
+    }
+
+    private bool CanRunAiAnalysis() => _aiProvider is not null
+        && _currentRun is not null
+        && _aiPromptSnapshot is not null
+        && ReferenceEquals(_aiPromptSnapshot.Run, _currentRun)
+        && !IsAnalyzingWithAi
+        && !IsScanning
+        && !IsLoadingHistory;
+
+    private bool IsCurrentAiOperation(int operationId, AiPromptSnapshot snapshot, CancellationTokenSource cancellation) =>
         operationId == _aiOperationId
         && ReferenceEquals(_aiCancellation, cancellation)
-        && ReferenceEquals(run, _currentRun)
-        && !IsScanning;
+        && ReferenceEquals(snapshot, _aiPromptSnapshot)
+        && ReferenceEquals(snapshot.Run, _currentRun)
+        && !IsScanning
+        && !IsLoadingHistory;
 
     [RelayCommand(CanExecute = nameof(CanRunAiAnalysis))]
     private async Task AnalyzeWithAiAsync()
     {
-        var run = _currentRun;
+        var snapshot = _aiPromptSnapshot;
+        var run = snapshot?.Run;
         var provider = _aiProvider;
-        if (run is null || provider is null || IsScanning)
+        if (snapshot is null || run is null || provider is null
+            || !ReferenceEquals(run, _currentRun) || IsScanning || IsLoadingHistory)
         {
             return;
         }
@@ -97,7 +141,7 @@ internal partial class HomeViewModel
         {
             AiStatusText = "Verificando o Ollama local...";
             var availability = await provider.CheckAvailabilityAsync(cancellation.Token);
-            if (!IsCurrentAiOperation(operationId, run, cancellation))
+            if (!IsCurrentAiOperation(operationId, snapshot, cancellation))
             {
                 return;
             }
@@ -109,8 +153,14 @@ internal partial class HomeViewModel
             }
 
             AiStatusText = $"Analisando com {availability.Model} neste computador. A primeira resposta pode levar alguns minutos.";
-            var result = await provider.AnalyzeAsync(DiagnosticPromptBuilder.Build(run), cancellation.Token);
-            if (!IsCurrentAiOperation(operationId, run, cancellation))
+            // Revalidar o mesmo run e o mesmo snapshot imediatamente antes do POST.
+            if (!IsCurrentAiOperation(operationId, snapshot, cancellation))
+            {
+                return;
+            }
+
+            var result = await provider.AnalyzeAsync(snapshot.Request, cancellation.Token);
+            if (!IsCurrentAiOperation(operationId, snapshot, cancellation))
             {
                 return;
             }
@@ -127,7 +177,7 @@ internal partial class HomeViewModel
         }
         catch (OperationCanceledException)
         {
-            if (IsCurrentAiOperation(operationId, run, cancellation))
+            if (IsCurrentAiOperation(operationId, snapshot, cancellation))
             {
                 AiStatusText = "Análise cancelada.";
             }

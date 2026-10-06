@@ -10,7 +10,7 @@
             <TextBlock Text="Milestone 1" FontSize="18" FontWeight="SemiBold" Margin="0,8,0,0" />
             <TextBlock Text="Tecnologias: .NET 9, WinUI 3, MVVM Toolkit, Entity Framework Core e SQLite." TextWrapping="Wrap" />
             <TextBlock Text="O Health Score exibido é temporário e fixo em 95; ele ainda não representa uma avaliação real da saúde do computador. Valores indisponíveis indicam que a API local não forneceu aquela informação." TextWrapping="Wrap" />
-            <TextBlock Text="Privacidade: a coleta é local. A análise opcional via Ollama envia ao endpoint configurado em loopback os textos de instrução e diagnóstico exibidos na prévia; identificadores conhecidos são redigidos, sem garantia de anonimização completa ou controle do app sobre o serviço local." TextWrapping="Wrap" />
+            <TextBlock Text="Privacidade: a análise opcional via Ollama envia ao endpoint configurado em loopback o prompt exibido na prévia, que pode incluir achados e orientações ManualOnly únicas com fontes declaradas, não autenticadas. Identificadores conhecidos são redigidos, sem garantia de anonimização completa; o app não controla o serviço Ollama local." TextWrapping="Wrap" />
             <TextBlock Text="Projeto distribuído sob a licença MIT." Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
     </ScrollViewer>

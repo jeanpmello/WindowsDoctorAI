@@ -322,6 +322,148 @@ public sealed class OllamaDiagnosticAiProviderTests
     }
 
     [Fact]
+    public void Prompt_includes_one_unique_manual_rule_with_source_reference_risk_and_typed_applicability()
+    {
+        var run = RunWith(Result(DiagnosticStatus.Finding, DiagnosticSeverity.Warning, "Falha observada 0xAABBCCDD"));
+        var runFindingIdentity = DiagnosticFindingIdentity.Create(DiagnosticPrivacyRedactor.Redact(run).Report!.Results[0]);
+        var guidance = CreateManualGuidance("fixture.unique", runFindingIdentity, runId: run.Id);
+        var recommendation = Assert.Single(guidance.Recommendations);
+        guidance = guidance with
+        {
+            Recommendations = [recommendation with
+            {
+                References =
+                [
+                    new ManualGuidanceReference("Manual 1", "https://docs.example.test/manual"),
+                    new ManualGuidanceReference("Manual 2", "https://docs.example.test/2"),
+                    new ManualGuidanceReference("Manual 3", "https://docs.example.test/3"),
+                    new ManualGuidanceReference("Manual excedente", "https://docs.example.test/4"),
+                    new ManualGuidanceReference("HTTP rejeitada", "http://docs.example.test/insegura")
+                ]
+            }]
+        };
+
+        var request = DiagnosticPromptBuilder.Build(run, [guidance]);
+
+        Assert.Contains("RuleId e versão: fixture.unique · v7", request.UserPrompt);
+        Assert.Contains("Fonte do pacote declarada: Fonte declarada, não autenticada: pacote-fixture", request.UserPrompt);
+        Assert.Contains("https://docs.example.test/manual", request.UserPrompt);
+        Assert.Contains("https://docs.example.test/2", request.UserPrompt);
+        Assert.Contains("https://docs.example.test/3", request.UserPrompt);
+        Assert.DoesNotContain("https://docs.example.test/4", request.UserPrompt);
+        Assert.DoesNotContain("http://docs.example.test/insegura", request.UserPrompt);
+        Assert.Contains("Referências omitidas por validação/limite: 2", request.UserPrompt);
+        Assert.Contains("Risco declarado: RISCO-fixture.unique", request.UserPrompt);
+        Assert.Contains("Privilégio requerido declarado: PRIVILEGIO-fixture.unique", request.UserPrompt);
+        Assert.Contains("Backup declarado: BACKUP-fixture.unique", request.UserPrompt);
+        Assert.Contains("Rollback declarado: ROLLBACK-fixture.unique", request.UserPrompt);
+        Assert.Contains("Aplicabilidade tipada projetada (não extrapolar): APLICABILIDADE-projetada-fixture.unique", request.UserPrompt);
+        Assert.Contains("match observacional/não causal", request.UserPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ManualOnly/não executada", request.UserPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("não verificada", request.UserPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("cite o RuleId e a versão exatos", request.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("abstenha-se de sugerir ação específica", request.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("autenticidade", request.SystemPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Prompt_omits_single_candidate_guidance_from_another_run_or_finding()
+    {
+        var run = RunWith(Result(DiagnosticStatus.Finding, DiagnosticSeverity.Warning, "Achado atual 0xAABBCCDD"));
+        var wrongRun = CreateManualGuidance("fixture.wrong-run", "other-run-finding", runId: Guid.NewGuid());
+        var wrongFinding = CreateManualGuidance("fixture.wrong-finding", "not-in-current-run", runId: run.Id);
+
+        var request = DiagnosticPromptBuilder.Build(run, [wrongRun, wrongFinding]);
+
+        Assert.DoesNotContain("AÇÃO-fixture.wrong-run", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.wrong-finding", request.UserPrompt);
+        Assert.Contains("SingleCandidate.RunIdIncompativel=1", request.UserPrompt);
+        Assert.Contains("SingleCandidate.AchadoIncompativel=1", request.UserPrompt);
+        Assert.Contains("incluídas: 0; omitidas: 2", request.UserPrompt);
+    }
+
+    [Fact]
+    public void Prompt_omits_single_candidate_when_same_identity_also_has_a_non_single_status()
+    {
+        var run = RunWith(Result(DiagnosticStatus.Finding, DiagnosticSeverity.Warning, "Achado atual 0xAABBCCDD"));
+        var guidance = new[]
+        {
+            CreateManualGuidance("fixture.shadow-single", "shared-identity"),
+            CreateManualGuidance("fixture.shadow-multiple", "shared-identity",
+                ManualGuidanceFindingStatus.MultipleCandidates, recommendationCount: 2)
+        };
+
+        var request = DiagnosticPromptBuilder.Build(run, guidance);
+
+        Assert.DoesNotContain("AÇÃO-fixture.shadow-single", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.shadow-multiple", request.UserPrompt);
+        Assert.Contains("IdentidadeDuplicada=2", request.UserPrompt);
+        Assert.Contains("Recebidas: 2", request.UserPrompt);
+        Assert.Contains("incluídas: 0; omitidas: 2", request.UserPrompt);
+    }
+
+    [Fact]
+    public void Prompt_omits_multiple_incomplete_unmatched_empty_ambiguous_and_duplicate_guidance_with_status_counts()
+    {
+        var ambiguousA = CreateManualGuidance("fixture.duplicate-a", "same-finding", ambiguous: true);
+        var ambiguousB = CreateManualGuidance("fixture.duplicate-b", "same-finding", ambiguous: true);
+        var guidance = new[]
+        {
+            CreateManualGuidance("fixture.multiple", "finding-multiple", ManualGuidanceFindingStatus.MultipleCandidates, recommendationCount: 2),
+            CreateManualGuidance("fixture.incomplete", "finding-incomplete", ManualGuidanceFindingStatus.Incomplete, recommendationCount: 0),
+            ambiguousA,
+            ambiguousB,
+            CreateManualGuidance("fixture.no-match", "finding-no-match", ManualGuidanceFindingStatus.NoMatch, recommendationCount: 0),
+            CreateManualGuidance("fixture.empty-base", "finding-empty-base", ManualGuidanceFindingStatus.KnowledgeBaseEmpty, recommendationCount: 0),
+            CreateManualGuidance("fixture.no-recommendation", "finding-no-recommendation", recommendationCount: 0),
+            CreateManualGuidance("fixture.duplicate-single-a", "duplicate-single"),
+            CreateManualGuidance("fixture.duplicate-single-b", "duplicate-single")
+        };
+
+        var request = DiagnosticPromptBuilder.Build(RunWith(Result(
+            DiagnosticStatus.Finding, DiagnosticSeverity.Warning, "Achado sintético 0xAABBCCDD")), guidance);
+
+        Assert.DoesNotContain("AÇÃO-fixture.multiple", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.incomplete", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.duplicate-a", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.duplicate-b", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.no-match", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.empty-base", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.no-recommendation", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.duplicate-single-a", request.UserPrompt);
+        Assert.DoesNotContain("AÇÃO-fixture.duplicate-single-b", request.UserPrompt);
+        Assert.Contains("MultipleCandidates=1", request.UserPrompt);
+        Assert.Contains("Incomplete=1", request.UserPrompt);
+        Assert.Contains("AmbiguousDuplicate=2", request.UserPrompt);
+        Assert.Contains("NoMatch=1", request.UserPrompt);
+        Assert.Contains("KnowledgeBaseEmpty=1", request.UserPrompt);
+        Assert.Contains("SingleCandidate.SemUmaRecommendation=1", request.UserPrompt);
+        Assert.Contains("IdentidadeDuplicada=2", request.UserPrompt);
+        Assert.Contains("Recebidas: 9", request.UserPrompt);
+        Assert.Contains("incluídas: 0; omitidas: 9", request.UserPrompt);
+    }
+
+    [Fact]
+    public void Prompt_keeps_combined_system_and_user_content_within_12000_characters()
+    {
+        var manyFindings = Enumerable.Range(0, 200)
+            .Select(i => Result(DiagnosticStatus.Finding, DiagnosticSeverity.Warning, $"Achado grande {i}", new string('x', 5_000)))
+            .ToArray();
+        var run = RunWith(manyFindings);
+        var redactedFindings = DiagnosticPrivacyRedactor.Redact(run).Report!.Results;
+        var manyGuidance = Enumerable.Range(0, 30)
+            .Select(i => CreateManualGuidance($"fixture.large-{i}", DiagnosticFindingIdentity.Create(redactedFindings[i]), longFields: true, runId: run.Id))
+            .ToArray();
+
+        var request = DiagnosticPromptBuilder.Build(run, manyGuidance);
+
+        Assert.True(request.TotalCharacters <= DiagnosticPromptBuilder.MaxTotalPromptCharacters);
+        Assert.True(request.UserPrompt.Length <= DiagnosticPromptBuilder.MaxUserPromptCharacters);
+        Assert.Contains("omitido", request.UserPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SingleCandidate.LimitePorOrientacao", request.UserPrompt);
+    }
+
+    [Fact]
     public void Prompt_labels_unavailable_checks_as_not_healthy()
     {
         var run = RunWith(Result(DiagnosticStatus.Unavailable, DiagnosticSeverity.Information, "Disco sem leitura"));
@@ -344,6 +486,61 @@ public sealed class OllamaDiagnosticAiProviderTests
 
         Assert.True(request.UserPrompt.Length <= DiagnosticPromptBuilder.MaxUserPromptCharacters + 100);
         Assert.Contains("omitidos", request.UserPrompt);
+    }
+
+    private static ManualGuidanceFinding CreateManualGuidance(
+        string ruleId,
+        string findingIdentity,
+        ManualGuidanceFindingStatus status = ManualGuidanceFindingStatus.SingleCandidate,
+        int recommendationCount = 1,
+        bool ambiguous = false,
+        bool longFields = false,
+        Guid runId = default)
+    {
+        var longValue = longFields ? new string('x', DiagnosticPromptBuilder.MaxFieldCharacters) : null;
+        var recommendations = Enumerable.Range(0, recommendationCount)
+            .Select(index => new ManualGuidanceRecommendation(
+                "ManualOnly / não executada",
+                $"{ruleId} · v7",
+                $"Título {ruleId}",
+                "Fixture",
+                "Força moderada; match observacional, não causal.",
+                "Explicação do match fixture.",
+                "Explicação declarada fixture.",
+                $"APLICABILIDADE-projetada-{ruleId}{longValue}",
+                "Aplicabilidade declarada pelo pacote.",
+                "Fonte declarada, não autenticada: pacote-fixture",
+                "versão-fixture-7",
+                "hash-fixture",
+                $"Ação diagnóstica {ruleId}",
+                $"AÇÃO-{ruleId}",
+                "Soluções declaradas, não executadas.",
+                [$"Solução {index} de {ruleId}"],
+                "Referências HTTPS declaradas; autenticidade não verificada.",
+                [new ManualGuidanceReference("Manual fixture", "https://docs.example.test/manual")],
+                $"RISCO-{ruleId}{longValue}",
+                $"PRIVILEGIO-{ruleId}{longValue}",
+                "Elevação declarada: não necessária.",
+                $"BACKUP-{ruleId}{longValue}",
+                $"ROLLBACK-{ruleId}{longValue}",
+                "Limitação da fonte fixture."))
+            .ToArray();
+
+        return new ManualGuidanceFinding(
+            "Execução sintética",
+            findingIdentity,
+            $"Achado fixture {ruleId}",
+            ambiguous,
+            "Evidência sintética redigida.",
+            "Provider estruturado (allowlist): WindowsUpdateClient",
+            status,
+            "Estado projetado fixture.",
+            recommendations,
+            Array.Empty<ManualGuidanceIncompleteCandidate>())
+        {
+            DiagnosticRunId = runId,
+            FindingIdentity = findingIdentity
+        };
     }
 
     [Fact]
