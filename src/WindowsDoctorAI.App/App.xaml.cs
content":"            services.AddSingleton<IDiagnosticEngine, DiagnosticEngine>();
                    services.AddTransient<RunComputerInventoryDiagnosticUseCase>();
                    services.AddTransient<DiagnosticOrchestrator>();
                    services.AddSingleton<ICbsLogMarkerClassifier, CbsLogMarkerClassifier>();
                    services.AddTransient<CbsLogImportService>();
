@@ -1,0 +1,61 @@
+using WindowsDoctorAI.Core;
+using WindowsDoctorAI.Domain;
+
+namespace WindowsDoctorAI.Application;
+
+/// <summary>
+/// Orquestra a execução e a apresentação de um diagnóstico em um único serviço de aplicação,
+/// sem acoplar a camada de UI ao fluxo de diagnóstico completo.
+/// </summary>
+public sealed class DiagnosticOrchestrator(
+    RunComputerInventoryDiagnosticUseCase runDiagnostic,
+    DiagnosticAssessmentService assessmentService,
+    IDiagnosticRunRepository history)
+{
+    public async Task<DiagnosticSessionSnapshot> ExecuteAsync(CancellationToken cancellationToken = default)
+    {
+        var outcome = await runDiagnostic.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+        var htmlReport = outcome.Run.Report is null
+            ? null
+            : await assessmentService.CreateHtmlReportAsync(outcome.Run, cancellationToken).ConfigureAwait(false);
+
+        return new DiagnosticSessionSnapshot(
+            outcome.Run,
+            outcome.HistorySaved,
+            outcome.PersistenceWarning,
+            true,
+            htmlReport);
+    }
+
+    public async Task<DiagnosticSessionSnapshot> LoadLatestAsync(CancellationToken cancellationToken = default)
+    {
+        var latest = await history.GetLatestAsync(cancellationToken).ConfigureAwait(false);
+        if (latest is null)
+        {
+            return new DiagnosticSessionSnapshot(
+                null,
+                false,
+                "Nenhum diagnóstico anterior foi encontrado no histórico local.",
+                false,
+                null);
+        }
+
+        var htmlReport = latest.Report is null
+            ? null
+            : await assessmentService.CreateHtmlReportAsync(latest, cancellationToken).ConfigureAwait(false);
+
+        return new DiagnosticSessionSnapshot(
+            latest,
+            true,
+            "Diagnóstico mais recente carregado do histórico local.",
+            true,
+            htmlReport);
+    }
+}
+
+public sealed record DiagnosticSessionSnapshot(
+    DiagnosticRun? Run,
+    bool HistorySaved,
+    string? StatusMessage,
+    bool IsCurrentRun,
+    string? HtmlReport);
