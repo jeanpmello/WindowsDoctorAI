@@ -10,6 +10,7 @@ internal static class XamlSmokeTestRunner
     private const string SmokeTestSwitch = "--xaml-smoke-test";
     private const string ResultPathSwitch = "--xaml-smoke-test-result";
     private static string? _resultPath;
+    private static string? _lastStage;
 
     internal static bool IsRequested { get; private set; }
 
@@ -27,7 +28,26 @@ internal static class XamlSmokeTestRunner
         if (resultPathIndex < 0 || resultPathIndex == args.Length - 1)
             throw new ArgumentException($"O modo smoke requer o caminho após {ResultPathSwitch}.", nameof(args));
 
-        _resultPath = Path.GetFullPath(args[resultPathIndex + 1]);
+        var resultPath = Path.GetFullPath(args[resultPathIndex + 1]);
+        var tempDirectory = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var resultDirectory = Path.GetDirectoryName(resultPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!string.Equals(resultDirectory, tempDirectory, StringComparison.OrdinalIgnoreCase)
+            || !Path.GetFileName(resultPath).StartsWith("WindowsDoctorAI-xaml-smoke-", StringComparison.OrdinalIgnoreCase)
+            || !Path.GetFileName(resultPath).EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("O arquivo de resultado deve ser um .txt com prefixo WindowsDoctorAI-xaml-smoke- na pasta temporária.", nameof(args));
+        }
+
+        _resultPath = resultPath;
+        ReportStage("EntryPoint: argumentos do smoke aceitos");
+    }
+
+    internal static void ReportStage(string stage)
+    {
+        if (!IsRequested || _resultPath is null) return;
+
+        _lastStage = stage;
+        File.WriteAllText(_resultPath, $"STAGE: {stage}{Environment.NewLine}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
     internal static void Run()
@@ -35,11 +55,13 @@ internal static class XamlSmokeTestRunner
         StartupFailureContext.Reset();
         try
         {
+            ReportStage("OnLaunched: validando thread WinUI");
             if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA)
                 throw new InvalidOperationException("A thread de inicialização WinUI não está em STA.");
             if (DispatcherQueue.GetForCurrentThread() is null)
                 throw new InvalidOperationException("A thread de inicialização não possui DispatcherQueue WinUI.");
 
+            ReportStage("OnLaunched: construindo MainWindow e carregando XAML");
             var navigationService = new InertNavigationService();
             _ = new MainWindow(new NoServiceProvider(), navigationService);
 
@@ -66,7 +88,7 @@ internal static class XamlSmokeTestRunner
 
         var details = StartupFailureDetails.ForAppEntryPoint(exception);
         Complete(
-            $"FAIL: estágio=AppEntryPoint; exceção={details.ExceptionType}; HRESULT={details.HResultCode}; exceção_interna={details.InnerExceptionType ?? "nenhuma"}",
+            $"FAIL: estágio={_lastStage ?? "AppEntryPoint"}; exceção={details.ExceptionType}; HRESULT={details.HResultCode}; exceção_interna={details.InnerExceptionType ?? "nenhuma"}",
             1);
     }
 

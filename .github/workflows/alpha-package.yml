@@ -132,16 +132,23 @@ jobs:
         run: |
           $packageDir = Join-Path $env:RUNNER_TEMP 'wdai-alpha-package'
           $exe = Join-Path $packageDir 'WindowsDoctorAI.App.exe'
-          $resultPath = Join-Path $env:RUNNER_TEMP 'wdai-mainwindow-xaml-smoke.txt'
+          $resultPath = Join-Path $env:RUNNER_TEMP 'WindowsDoctorAI-xaml-smoke-ci.txt'
           if (Test-Path $resultPath) { Remove-Item -Path $resultPath -Force }
 
-          & $exe --xaml-smoke-test --xaml-smoke-test-result $resultPath
-          $smokeExitCode = $LASTEXITCODE
+          $process = Start-Process -FilePath $exe `
+            -ArgumentList @('--xaml-smoke-test', '--xaml-smoke-test-result', $resultPath) `
+            -WorkingDirectory $packageDir -NoNewWindow -PassThru -Wait -ErrorAction Stop
+          $smokeExitCode = $process.ExitCode
           if (-not (Test-Path $resultPath)) {
-            throw "O smoke test não produziu resultado; o executável terminou com código $smokeExitCode."
+            throw "O smoke test não produziu resultado; o executável terminou com código $smokeExitCode; não houve estágio registrado."
           }
 
           $smokeResult = Get-Content -Path $resultPath -Raw
+          if ($smokeResult -notmatch '^PASS:' -and $smokeExitCode -ne 0) {
+            Write-Host $smokeResult.Trim()
+            throw "O smoke test não concluiu com sucesso (exit code $smokeExitCode)."
+          }
+
           Write-Host $smokeResult.Trim()
           if ($smokeExitCode -ne 0 -or $smokeResult -notmatch '^PASS:') {
             throw "Falha no smoke test de MainWindow (exit code $smokeExitCode)."
