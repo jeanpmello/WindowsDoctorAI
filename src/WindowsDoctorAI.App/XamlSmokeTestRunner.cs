@@ -61,7 +61,10 @@ internal static class XamlSmokeTestRunner
             if (DispatcherQueue.GetForCurrentThread() is null)
                 throw new InvalidOperationException("A thread de inicialização não possui DispatcherQueue WinUI.");
 
-            ReportStage("OnLaunched: construindo MainWindow e carregando XAML");
+            ReportStage("XamlProbe: construindo uma Window vazia");
+            _ = new XamlProbeWindow();
+
+            ReportStage("MainWindow: construindo a janela e carregando XAML");
             var navigationService = new InertNavigationService();
             _ = new MainWindow(new NoServiceProvider(), navigationService);
 
@@ -76,8 +79,11 @@ internal static class XamlSmokeTestRunner
         {
             var details = StartupFailureDetails.ForOnLaunched(exception, StartupFailureContext.CurrentStage);
             var innerException = details.InnerExceptionType ?? "nenhuma";
+            var stage = string.Equals(details.Stage, "OnLaunched", StringComparison.Ordinal)
+                ? _lastStage ?? details.Stage
+                : details.Stage;
             Complete(
-                $"FAIL: estágio={details.Stage}; exceção={details.ExceptionType}; HRESULT={details.HResultCode}; exceção_interna={innerException}",
+                $"FAIL: estágio={stage}; exceção={details.ExceptionType}; HRESULT={details.HResultCode}; exceção_interna={innerException}",
                 1);
         }
     }
