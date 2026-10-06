@@ -21,6 +21,20 @@ A execução visual da UI, permissões e respostas das APIs do Windows podem var
 
 O app é local. A IA não tem provedor ativo, e o inventário não é enviado a um serviço externo. O histórico local de diagnósticos é opt-in e desativado por padrão; dados necessários ao funcionamento podem ser gravados localmente, e relatórios HTML só são salvos se solicitados pela pessoa usuária.
 
+## Verificar somente o XAML da janela
+
+Para testar a inicialização XAML do pacote sem abrir a janela, iniciar inventário ou executar reparos, abra o PowerShell na pasta extraída e rode:
+
+```powershell
+$result = Join-Path $env:TEMP "WindowsDoctorAI-xaml-smoke-$([guid]::NewGuid().ToString('N')).txt"
+& .\WindowsDoctorAI.App.exe --xaml-smoke-test --xaml-smoke-test-result $result
+$exitCode = $LASTEXITCODE
+if (Test-Path $result) { Get-Content -Path $result }
+if ($exitCode -ne 0) { throw "O smoke test falhou (código $exitCode)." }
+```
+
+`PASS` confirma somente a construção de `MainWindow` e o retorno de `InitializeComponent()` no thread STA real do WinUI. `FAIL` inclui estágio, tipo de exceção e HRESULT; este teste não valida a interface visual nem o comportamento completo de inicialização do aplicativo.
+
 ## Enviar feedback
 
 Abra uma [issue no WindowsDoctorAI](https://github.com/jeanpmello/WindowsDoctorAI/issues) e informe a versão/build do Windows 11, o que tentou fazer, o resultado esperado e o que ocorreu. Se a caixa de inicialização for exibida, informe somente o código técnico mostrado. Não envie logs completos, dumps, tokens, senhas, identificadores do computador ou dados de backup.

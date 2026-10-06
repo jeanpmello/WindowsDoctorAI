@@ -12,6 +12,7 @@ internal static class AppEntryPoint
     {
         try
         {
+            XamlSmokeTestRunner.Configure(args);
             WinRT.ComWrappersSupport.InitializeComWrappers();
             global::Microsoft.UI.Xaml.Application.Start(startupArgs =>
             {
@@ -22,6 +23,12 @@ internal static class AppEntryPoint
         }
         catch (Exception exception)
         {
+            if (XamlSmokeTestRunner.IsRequested)
+            {
+                XamlSmokeTestRunner.FailAtAppEntryPoint(exception);
+                return;
+            }
+
             StartupFailureDialog.Show(StartupFailureDetails.ForAppEntryPoint(exception));
             Environment.ExitCode = 1;
         }
