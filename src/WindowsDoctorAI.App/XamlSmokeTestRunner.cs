@@ -71,6 +71,15 @@ internal static class XamlSmokeTestRunner
             if (XamlReader.Load("<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" />") is not Grid)
                 throw new InvalidOperationException("O parser XAML não produziu o controle Grid esperado.");
 
+            ReportStage("AboutPage: carregando XAML compilado");
+            _ = new AboutPage();
+
+            ReportStage("SettingsPage: carregando XAML compilado");
+            _ = new SettingsPage(null!);
+
+            ReportStage("HomePage: carregando XAML compilado");
+            _ = new HomePage(null!);
+
             ReportStage("MainWindow: construindo a janela e carregando XAML");
             var navigationService = new InertNavigationService();
             _ = new MainWindow(new NoServiceProvider(), navigationService);
@@ -79,7 +88,7 @@ internal static class XamlSmokeTestRunner
                 throw new InvalidOperationException("MainWindow não solicitou exatamente uma navegação inicial.");
 
             Complete(
-                "PASS: Window e Grid XAML em memória foram criados; MainWindow foi construída na thread UI/STA do WinUI; InitializeComponent() concluiu; a navegação foi inerte; nenhuma janela foi ativada e nenhum serviço real foi resolvido.",
+                "PASS: Window, Grid XAML em memória, páginas e MainWindow foram construídos na thread UI/STA do WinUI; InitializeComponent() concluiu; a navegação foi inerte; nenhuma janela foi ativada e nenhum serviço real foi resolvido.",
                 0);
         }
         catch (Exception exception)

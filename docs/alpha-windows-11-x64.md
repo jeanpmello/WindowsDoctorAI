@@ -33,7 +33,7 @@ if (Test-Path $result) { Get-Content -Path $result }
 if ($exitCode -ne 0) { throw "O smoke test falhou (código $exitCode)." }
 ```
 
-`PASS` confirma a construção de uma `Window`, a leitura de um `Grid` em memória com `XamlReader.Load` e a construção de `MainWindow`, incluindo o retorno de `InitializeComponent()` no thread STA real do WinUI. `FAIL` inclui estágio, tipo de exceção e HRESULT; nenhuma janela é ativada, e o teste não valida a interface visual nem o comportamento completo de inicialização do aplicativo. O caminho de saída deve ser um `.txt` com prefixo `WindowsDoctorAI-xaml-smoke-` diretamente na pasta temporária do usuário.
+`PASS` confirma a construção de uma `Window`, a leitura de um `Grid` em memória com `XamlReader.Load` e a construção de AboutPage, SettingsPage, HomePage e MainWindow, incluindo o retorno de `InitializeComponent()` no thread STA real do WinUI. `FAIL` identifica o último estágio, tipo de exceção e HRESULT; nenhuma janela é ativada, e o teste não valida a interface visual nem o comportamento completo de inicialização do aplicativo. O caminho de saída deve ser um `.txt` com prefixo `WindowsDoctorAI-xaml-smoke-` diretamente na pasta temporária do usuário.
 
 ## Enviar feedback
 
