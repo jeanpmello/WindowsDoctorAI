@@ -3,16 +3,13 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Windows Doctor AI">
-    <Grid ColumnDefinitions="220,*">
-        <StackPanel Grid.Column="0" Padding="12" Spacing="8">
-            <TextBlock Text="Windows Doctor AI" FontSize="18" FontWeight="SemiBold" Margin="4,8,4,12" />
-            <RadioButton x:Name="HomeNavigationButton" Content="Inicial" Tag="home"
-                         GroupName="MainNavigation" IsChecked="True" Click="NavigationButton_Click" />
-            <RadioButton x:Name="AboutNavigationButton" Content="Sobre" Tag="about"
-                         GroupName="MainNavigation" Click="NavigationButton_Click" />
-            <RadioButton x:Name="SettingsNavigationButton" Content="Configurações" Tag="settings"
-                         GroupName="MainNavigation" Click="NavigationButton_Click" />
+    <Grid>
+        <StackPanel>
+            <TextBlock Text="Windows Doctor AI" />
+            <RadioButton x:Name="HomeNavigationButton" Click="NavigationButton_Click" />
+            <RadioButton x:Name="AboutNavigationButton" Click="NavigationButton_Click" />
+            <RadioButton x:Name="SettingsNavigationButton" Click="NavigationButton_Click" />
+            <Frame x:Name="PageFrame" />
         </StackPanel>
-        <Frame x:Name="PageFrame" Grid.Column="1" />
     </Grid>
 </Window>
