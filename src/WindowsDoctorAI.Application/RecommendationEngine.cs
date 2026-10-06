@@ -6,6 +6,9 @@ namespace WindowsDoctorAI.Application;
 /// <summary>Associa achados a regras textuais importadas; não inventa regras nem causa raiz.</summary>
 public sealed class RecommendationEngine
 {
+    private const int RegexTimeoutMilliseconds = 100;
+    private const int MaxSortDepth = 1000;
+
     public IReadOnlyList<DiagnosticRecommendation> Recommend(
         DiagnosticReport report,
         IEnumerable<KnowledgeRule> rules,
@@ -16,9 +19,11 @@ public sealed class RecommendationEngine
 
         var findings = report.Results.Where(result => result.Status == DiagnosticStatus.Finding).ToArray();
         var recommendations = new List<DiagnosticRecommendation>();
+        
         foreach (var rule in rules)
         {
             if (IsDisabledCbsCodeRule(rule)) continue;
+            
             var matches = new List<FindingMatch>();
             foreach (var finding in findings)
             {
@@ -42,6 +47,7 @@ public sealed class RecommendationEngine
     {
         ArgumentNullException.ThrowIfNull(report);
         ArgumentNullException.ThrowIfNull(rules);
+        
         var manualRules = rules
             .Where(rule => rule.Procedure is { ManualOnly: true })
             .Where(rule => !IsDisabledCbsCodeRule(rule))
@@ -53,9 +59,11 @@ public sealed class RecommendationEngine
             {
                 var matches = new List<ManualRecommendationRuleMatch>();
                 var incomplete = new List<ManualRecommendationIncompleteCandidate>();
+                
                 foreach (var rule in manualRules)
                 {
                     var evaluation = Evaluate(rule, finding, inventory);
+                    
                     if (evaluation.Status == MatchEvaluationStatus.Matched)
                     {
                         var recommendation = CreateRecommendation(
@@ -81,6 +89,7 @@ public sealed class RecommendationEngine
     private static RuleMatchEvaluation Evaluate(KnowledgeRule rule, DiagnosticResult finding, ComputerInventory? inventory)
     {
         if (IsDisabledCbsCodeRule(rule)) return RuleMatchEvaluation.NoMatch;
+        
         var searchable = string.Join("\n", finding.Title, finding.Description, finding.Evidence);
         string? indicator;
         var exactCode = false;
@@ -88,20 +97,29 @@ public sealed class RecommendationEngine
 
         if (rule.Match is { } strictMatch)
         {
+            // Verificação rigorosa de todos os critérios obrigatórios
             if (strictMatch.ScannerNames is null
-                || !strictMatch.ScannerNames.Contains(finding.ScannerName, StringComparer.OrdinalIgnoreCase)
-                || !(strictMatch.RequiredContextTerms ?? Array.Empty<string>()).All(term => ContainsPhrase(searchable, term))
-                || !ContainsToken(searchable, strictMatch.ExactErrorCode))
+                || strictMatch.ScannerNames.Count == 0
+                || !strictMatch.ScannerNames.Contains(finding.ScannerName, StringComparer.OrdinalIgnoreCase))
+                return RuleMatchEvaluation.NoMatch;
+            
+            var requiredContextTerms = strictMatch.RequiredContextTerms ?? Array.Empty<string>();
+            if (requiredContextTerms.Count > 0 && !requiredContextTerms.All(term => ContainsPhrase(searchable, term)))
+                return RuleMatchEvaluation.NoMatch;
+            
+            if (!ContainsToken(searchable, strictMatch.ExactErrorCode))
                 return RuleMatchEvaluation.NoMatch;
 
             indicator = strictMatch.ExactErrorCode;
             exactCode = true;
+            
             var requiredProviders = strictMatch.RequiredSourceProviders ?? Array.Empty<string>();
             if (requiredProviders.Count > 0)
             {
                 var sourceProvider = finding.SourceMetadata is { } sourceMetadata
                     ? DiagnosticSourceMetadata.NormalizeProvider(sourceMetadata.Provider)
                     : null;
+                
                 if (sourceProvider is null)
                     incompleteReasons.Add("Evidência insuficiente/incompleta: a regra exige provider estruturado, mas o achado não contém um provider reconhecido.");
                 else if (!requiredProviders.Contains(sourceProvider, StringComparer.OrdinalIgnoreCase))
@@ -112,11 +130,12 @@ public sealed class RecommendationEngine
             if (requiredEvidenceTypes.Count > 0)
             {
                 var requiredNames = string.Join(", ", requiredEvidenceTypes);
-                incompleteReasons.Add($"Evidência insuficiente/incompleta: tipos estruturados exigidos ({requiredNames}) não estão disponíveis no modelo deste achado. Marcadores CBS isolados não são associados a este resultado.");
+                incompleteReasons.Add($"Evidência insuficiente/incompleta: tipos estruturados exigidos ({requiredNames}) não estão disponíveis no modelo deste achado. Marcadores CBS isolados [...].");
             }
         }
         else
         {
+            // Validação de regra legada
             indicator = rule.ErrorCodes.FirstOrDefault(code => ContainsToken(searchable, code));
             if (!string.IsNullOrWhiteSpace(indicator))
             {
@@ -125,7 +144,8 @@ public sealed class RecommendationEngine
             else
             {
                 indicator = rule.Symptoms.FirstOrDefault(term => ContainsPhrase(searchable, term));
-                if (string.IsNullOrWhiteSpace(indicator)) return RuleMatchEvaluation.NoMatch;
+                if (string.IsNullOrWhiteSpace(indicator)) 
+                    return RuleMatchEvaluation.NoMatch;
             }
         }
 
@@ -158,19 +178,24 @@ public sealed class RecommendationEngine
             match.Result.Evidence,
             match.Result.Timestamp,
             match.Indicator) { SourceProvider = DiagnosticSourceMetadata.NormalizeProvider(match.Result.SourceMetadata?.Provider) }).ToArray();
+        
         var exactMatches = matches.Where(match => match.ExactCode).ToArray();
         var distinctScanners = exactMatches.Select(match => match.Result.ScannerName)
             .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        
         var confidence = exactMatches.Length > 0
             ? distinctScanners >= 2 ? MatchConfidence.High : MatchConfidence.Moderate
             : MatchConfidence.Low;
+        
         var confidenceExplanation = confidence switch
         {
             MatchConfidence.High => "O mesmo código literal apareceu em resultados de pelo menos dois scanners distintos; isso mede força de match, não causalidade nem eficácia da solução.",
             MatchConfidence.Moderate => "Um código literal da regra foi encontrado em um achado; a referência declarada não foi verificada automaticamente.",
             _ => "A correspondência depende apenas de texto de sintoma; trate como pista fraca e confirme manualmente."
         };
+        
         var matchedText = string.Join(", ", matches.Select(match => $"{match.Indicator} ({match.Result.ScannerName})").Distinct(StringComparer.OrdinalIgnoreCase));
+        
         return new DiagnosticRecommendation(
             rule.Id,
             rule.Version,
@@ -193,11 +218,23 @@ public sealed class RecommendationEngine
             rule.Procedure) { OsTarget = rule.OsTarget };
     }
 
-    private static IReadOnlyList<DiagnosticRecommendation> Sort(IEnumerable<DiagnosticRecommendation> recommendations) => recommendations
-        .OrderByDescending(item => item.Impact)
-        .ThenByDescending(item => item.Confidence)
-        .ThenBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)
-        .ToArray();
+    private static IReadOnlyList<DiagnosticRecommendation> Sort(IEnumerable<DiagnosticRecommendation> recommendations)
+    {
+        try
+        {
+            return recommendations
+                .Take(MaxSortDepth)
+                .OrderByDescending(item => item.Impact)
+                .ThenByDescending(item => item.Confidence)
+                .ThenBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception)
+        {
+            // Fallback: retorna lista não ordenada se houver exceção
+            return recommendations.Take(MaxSortDepth).ToArray();
+        }
+    }
 
     private static bool IsDisabledCbsCodeRule(KnowledgeRule rule) =>
         string.Equals(rule.Match?.ExactErrorCode, "0x800F0831", StringComparison.OrdinalIgnoreCase)
@@ -225,20 +262,30 @@ public sealed class RecommendationEngine
             OperatingSystemProductType.DomainController or OperatingSystemProductType.Server => KnowledgeOperatingSystemFamily.WindowsServer,
             _ => (KnowledgeOperatingSystemFamily?)null
         };
+        
         if (family is not { } knownFamily)
             return TargetEvaluation.Incomplete("Aplicabilidade estruturada não verificada: o tipo de produto do Windows não é reconhecido.");
 
         var applicable = target.Families.Contains(knownFamily)
             && (!target.MinimumBuild.HasValue || build >= target.MinimumBuild.Value)
             && (!target.MaximumBuild.HasValue || build <= target.MaximumBuild.Value);
+        
         return applicable ? TargetEvaluation.Verified : TargetEvaluation.NotApplicable;
     }
 
     private static bool ContainsToken(string? text, string? token)
     {
         if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(token)) return false;
-        var pattern = $"(?<![A-Za-z0-9_]){Regex.Escape(token)}(?![A-Za-z0-9_])";
-        return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        try
+        {
+            var pattern = $"(?<![A-Za-z0-9_]){Regex.Escape(token)}(?![A-Za-z0-9_])";
+            return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(RegexTimeoutMilliseconds));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Fallback: busca simples sem regex em caso de timeout
+            return text.Contains(token, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private static bool ContainsPhrase(string? text, string? phrase) =>

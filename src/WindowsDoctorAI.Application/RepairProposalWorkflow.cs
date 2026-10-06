@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Domain;
 
@@ -15,7 +16,8 @@ public sealed record RepairProposalBuildResult(
 public sealed class RepairProposalBuilder(
     RecommendationEngine recommendationEngine,
     IRepairProposalAllowlist allowlist,
-    IRepairEvidenceGate evidenceGate)
+    IRepairEvidenceGate evidenceGate,
+    ILogger<RepairProposalBuilder>? logger = null)
 {
     private static readonly RepairConditionKind[] RequiredPreconditions =
     [
@@ -38,117 +40,186 @@ public sealed class RepairProposalBuilder(
     public RepairProposalBuildResult Build(DiagnosticRun? run, IReadOnlyList<KnowledgeRule> rules)
     {
         ArgumentNullException.ThrowIfNull(rules);
-        if (run?.Report is null || run.Id == Guid.Empty)
+        
+        if (run is null)
+            return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), Array.Empty<string>());
+        
+        if (run.Report is null || run.Id == Guid.Empty)
             return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), Array.Empty<string>());
 
         var generation = evidenceGate.CurrentGeneration;
+        
         if (run.EvidenceGeneration != generation)
+        {
+            logger?.LogWarning("Geração de evidência mudou durante a construção de propostas; evidência obsoleta detectada.");
             return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), Array.Empty<string>(), EvidenceChangedDuringBuild: true);
+        }
+        
         if (evidenceGate.CurrentDiagnosticRunId != run.Id)
+        {
+            logger?.LogWarning("Diagnóstico atual mudou durante a construção de propostas; execução não é atual.");
             return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), Array.Empty<string>(), DiagnosticRunNotCurrent: true);
+        }
 
-        var report = DiagnosticPrivacyRedactor.RedactReport(run.Report, run.Inventory)!;
-        var recommendations = recommendationEngine.Recommend(report, rules, DiagnosticPrivacyRedactor.RedactInventory(run.Inventory));
-        var rulesByVersion = rules
-            .GroupBy(rule => (rule.Id, rule.Version))
-            .Where(group => group.Count() == 1)
-            .ToDictionary(group => group.Key, group => group.Single());
-        var evidenceRows = recommendations
-            .SelectMany(recommendation => recommendation.Evidence.Select(evidence => new
+        try
+        {
+            var report = DiagnosticPrivacyRedactor.RedactReport(run.Report, run.Inventory)!;
+            var recommendations = recommendationEngine.Recommend(report, rules, DiagnosticPrivacyRedactor.RedactInventory(run.Inventory));
+            var rulesByVersion = rules
+                .GroupBy(rule => (rule.Id, rule.Version))
+                .Where(group => group.Count() == 1)
+                .ToDictionary(group => group.Key, group => group.Single());
+            
+            var evidenceRows = recommendations
+                .SelectMany(recommendation => recommendation.Evidence.Select(evidence => new
+                {
+                    Recommendation = recommendation,
+                    Evidence = evidence,
+                    Identity = DiagnosticFindingIdentity.Create(evidence)
+                }))
+                .ToArray();
+            
+            var ambiguousIdentities = evidenceRows
+                .GroupBy(row => row.Identity, StringComparer.Ordinal)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            
+            var proposals = BuildProposals(run, report, evidenceRows, ambiguousIdentities, rulesByVersion);
+            
+            // Revalidar condições após construção
+            var finalGeneration = evidenceGate.CurrentGeneration;
+            if (finalGeneration != generation)
             {
-                Recommendation = recommendation,
-                Evidence = evidence,
-                Identity = DiagnosticFindingIdentity.Create(evidence)
-            }))
-            .ToArray();
-        var ambiguousIdentities = evidenceRows
-            .GroupBy(row => row.Identity, StringComparer.Ordinal)
-            .Where(group => group.Count() > 1)
-            .Select(group => group.Key)
-            .ToHashSet(StringComparer.Ordinal);
+                logger?.LogWarning("Geração de evidência mudou durante iteração de propostas.");
+                return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), ambiguousIdentities.Order(StringComparer.Ordinal).ToArray(), EvidenceChangedDuringBuild: true);
+            }
+            
+            if (evidenceGate.CurrentDiagnosticRunId != run.Id)
+            {
+                logger?.LogWarning("Diagnóstico atual mudou durante iteração de propostas.");
+                return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), ambiguousIdentities.Order(StringComparer.Ordinal).ToArray(), DiagnosticRunNotCurrent: true);
+            }
+            
+            var uniqueProposals = proposals
+                .Where(proposal => !ambiguousIdentities.Contains(proposal.FindingIdentity))
+                .OrderBy(proposal => proposal.Title, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(proposal => proposal.FindingIdentity, StringComparer.Ordinal)
+                .ToArray();
+            
+            return new RepairProposalBuildResult(uniqueProposals, ambiguousIdentities.Order(StringComparer.Ordinal).ToArray());
+        }
+        catch (Exception exception)
+        {
+            logger?.LogError(exception, "Erro ao construir propostas de reparo; tipo de exceção: {ExceptionType}", exception.GetType().Name);
+            throw;
+        }
+    }
+
+    private List<RepairProposal> BuildProposals(
+        DiagnosticRun run,
+        DiagnosticReport report,
+        IReadOnlyCollection<dynamic> evidenceRows,
+        HashSet<string> ambiguousIdentities,
+        Dictionary<(string, int), KnowledgeRule> rulesByVersion)
+    {
         var proposals = new List<RepairProposal>();
 
         foreach (var row in evidenceRows)
         {
             var recommendation = row.Recommendation;
-            if (ambiguousIdentities.Contains(row.Identity)
-                || !rulesByVersion.TryGetValue((recommendation.RuleId, recommendation.RuleVersion), out var rule)
-                || rule.Procedure is not { ManualOnly: false, IsModifying: false, RequiresElevation: false, RequiresUserConfirmation: true }
-                || !allowlist.TryGetDefinition(rule.Id, rule.Version, out var definition)
+            var identity = row.Identity;
+
+            if (ambiguousIdentities.Contains(identity)
+                || !rulesByVersion.TryGetValue((recommendation.RuleId, recommendation.RuleVersion), out var rule))
+                continue;
+
+            if (rule.Procedure is not { ManualOnly: false, IsModifying: false, RequiresElevation: false, RequiresUserConfirmation: true })
+                continue;
+
+            if (!allowlist.TryGetDefinition(rule.Id, rule.Version, out var definition)
                 || !IsValidDefinition(definition, rule))
                 continue;
 
             var matchingReportFindings = report.Results.Count(result => result.Status == DiagnosticStatus.Finding
-                && string.Equals(DiagnosticFindingIdentity.Create(result), row.Identity, StringComparison.Ordinal));
+                && string.Equals(DiagnosticFindingIdentity.Create(result), identity, StringComparison.Ordinal));
+            
             if (matchingReportFindings != 1)
             {
-                ambiguousIdentities.Add(row.Identity);
+                ambiguousIdentities.Add(identity);
                 continue;
             }
 
             var redactedEvidence = DiagnosticPrivacyRedactor.RedactText(
                 $"{row.Evidence.ScannerName} · {row.Evidence.Category} · {row.Evidence.Title} · {row.Evidence.Evidence}",
                 run.Inventory);
-            var evidenceFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(redactedEvidence))).ToLowerInvariant();
+            
+            var evidenceFingerprint = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes(redactedEvidence))).ToLowerInvariant();
+            
             var stableProposalKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"{definition!.ProposalId}\n{rule.Id}\n{rule.Version}\n{row.Identity}"))).ToLowerInvariant();
+                $"{definition!.ProposalId}\n{rule.Id}\n{rule.Version}\n{identity}"))).ToLowerInvariant();
+            
             var proposalId = $"{definition.ProposalId}.{stableProposalKey}";
-            proposals.Add(new RepairProposal(
-                proposalId,
-                definition.Title,
-                definition.Description,
-                definition.Risk,
-                definition.Impact,
-                RequiresExplicitApproval: true,
-                SupportsRollback: definition.SupportsRollback,
-                PlanVersion: definition.PlanVersion,
-                Target: definition.Target,
-                Preconditions: definition.Preconditions.Select(condition => condition.DisplayText).ToArray(),
-                Postconditions: definition.Postconditions.Select(condition => condition.DisplayText).ToArray(),
-                RollbackPreconditions: (definition.RollbackPreconditions ?? Array.Empty<RepairPlanCondition>())
-                    .Select(condition => condition.DisplayText).ToArray(),
-                RollbackPostconditions: (definition.RollbackPostconditions ?? Array.Empty<RepairPlanCondition>())
-                    .Select(condition => condition.DisplayText).ToArray())
-            {
-                Kind = definition.Kind,
-                OperationVersion = definition.OperationVersion,
-                DiagnosticRunId = run.Id,
-                EvidenceGeneration = generation,
-                FindingIdentity = row.Identity,
-                RuleId = rule.Id,
-                RuleVersion = rule.Version,
-                EvidenceFingerprint = evidenceFingerprint,
-                RedactedEvidence = redactedEvidence,
-                StructuredPreconditions = definition.Preconditions.ToArray(),
-                StructuredPostconditions = definition.Postconditions.ToArray(),
-                StructuredRollbackPreconditions = (definition.RollbackPreconditions ?? Array.Empty<RepairPlanCondition>()).ToArray(),
-                StructuredRollbackPostconditions = (definition.RollbackPostconditions ?? Array.Empty<RepairPlanCondition>()).ToArray()
-            });
+            
+            proposals.Add(CreateProposal(definition, rule, run, proposalId, identity, redactedEvidence, evidenceFingerprint));
         }
 
+        // Verificar duplicatas e adicionar identidades ambíguas
         var duplicateProposalIds = proposals
             .GroupBy(proposal => proposal.Id, StringComparer.OrdinalIgnoreCase)
             .Where(group => group.Count() > 1)
             .ToArray();
+        
         foreach (var duplicate in duplicateProposalIds)
         {
             foreach (var proposal in duplicate)
                 ambiguousIdentities.Add(proposal.FindingIdentity);
         }
 
-        var uniqueProposals = proposals
-            .Where(proposal => !ambiguousIdentities.Contains(proposal.FindingIdentity))
-            .OrderBy(proposal => proposal.Title, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(proposal => proposal.FindingIdentity, StringComparer.Ordinal)
-            .ToArray();
-        if (evidenceGate.CurrentGeneration != generation)
-            return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), ambiguousIdentities.Order(StringComparer.Ordinal).ToArray(),
-                EvidenceChangedDuringBuild: true);
-        if (evidenceGate.CurrentDiagnosticRunId != run.Id)
-            return new RepairProposalBuildResult(Array.Empty<RepairProposal>(), ambiguousIdentities.Order(StringComparer.Ordinal).ToArray(),
-                DiagnosticRunNotCurrent: true);
+        return proposals;
+    }
 
-        return new RepairProposalBuildResult(uniqueProposals, ambiguousIdentities.Order(StringComparer.Ordinal).ToArray());
+    private static RepairProposal CreateProposal(
+        RepairProposalDefinition definition,
+        KnowledgeRule rule,
+        DiagnosticRun run,
+        string proposalId,
+        string findingIdentity,
+        string redactedEvidence,
+        string evidenceFingerprint)
+    {
+        return new RepairProposal(
+            proposalId,
+            definition.Title,
+            definition.Description,
+            definition.Risk,
+            definition.Impact,
+            RequiresExplicitApproval: true,
+            SupportsRollback: definition.SupportsRollback,
+            PlanVersion: definition.PlanVersion,
+            Target: definition.Target,
+            Preconditions: definition.Preconditions.Select(condition => condition.DisplayText).ToArray(),
+            Postconditions: definition.Postconditions.Select(condition => condition.DisplayText).ToArray(),
+            RollbackPreconditions: (definition.RollbackPreconditions ?? Array.Empty<RepairPlanCondition>())
+                .Select(condition => condition.DisplayText).ToArray(),
+            RollbackPostconditions: (definition.RollbackPostconditions ?? Array.Empty<RepairPlanCondition>())
+                .Select(condition => condition.DisplayText).ToArray())
+        {
+            Kind = definition.Kind,
+            OperationVersion = definition.OperationVersion,
+            DiagnosticRunId = run.Id,
+            EvidenceGeneration = run.EvidenceGeneration,
+            FindingIdentity = findingIdentity,
+            RuleId = rule.Id,
+            RuleVersion = rule.Version,
+            EvidenceFingerprint = evidenceFingerprint,
+            RedactedEvidence = redactedEvidence,
+            StructuredPreconditions = definition.Preconditions.ToArray(),
+            StructuredPostconditions = definition.Postconditions.ToArray(),
+            StructuredRollbackPreconditions = (definition.RollbackPreconditions ?? Array.Empty<RepairPlanCondition>()).ToArray(),
+            StructuredRollbackPostconditions = (definition.RollbackPostconditions ?? Array.Empty<RepairPlanCondition>()).ToArray()
+        };
     }
 
     private static bool IsValidDefinition(RepairProposalDefinition? definition, KnowledgeRule rule) =>
@@ -189,7 +260,8 @@ public sealed class DiagnosticRepairPreconditionEvaluator(
     IKnowledgeRepository knowledgeRepository,
     RecommendationEngine recommendationEngine,
     IRepairProposalAllowlist allowlist,
-    IRepairEvidenceGate evidenceGate) : IRepairPreconditionEvaluator
+    IRepairEvidenceGate evidenceGate,
+    ILogger<DiagnosticRepairPreconditionEvaluator>? logger = null) : IRepairPreconditionEvaluator
 {
     public async Task<IReadOnlyList<RepairConditionResult>> EvaluateAsync(
         RepairProposal proposal,
@@ -198,75 +270,122 @@ public sealed class DiagnosticRepairPreconditionEvaluator(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(proposal);
+        cancellationToken.ThrowIfCancellationRequested();
+        
         var conditions = action == RepairAction.Rollback
             ? proposal.StructuredRollbackPreconditions
             : proposal.StructuredPreconditions;
-        if (conditions.Count == 0) return Array.Empty<RepairConditionResult>();
+        
+        if (conditions.Count == 0) 
+            return Array.Empty<RepairConditionResult>();
 
-        var generationAtStart = evidenceGate.CurrentGeneration;
-        var latest = await history.GetLatestAsync(cancellationToken).ConfigureAwait(false);
-        var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(false);
-        var matchingRules = rules.Where(rule => string.Equals(rule.Id, proposal.RuleId, StringComparison.OrdinalIgnoreCase)).ToArray();
-        var currentRule = matchingRules.OrderByDescending(rule => rule.Version).FirstOrDefault();
-        var runIsCurrent = latest?.Id == proposal.DiagnosticRunId && latest.Report is not null
-            && proposal.EvidenceGeneration == generationAtStart
-            && evidenceGate.CurrentDiagnosticRunId == proposal.DiagnosticRunId;
-        var matchingFindings = runIsCurrent
-            ? latest!.Report!.Results.Where(result => result.Status == DiagnosticStatus.Finding
-                && string.Equals(DiagnosticFindingIdentity.Create(result), proposal.FindingIdentity, StringComparison.Ordinal)).ToArray()
-            : Array.Empty<DiagnosticResult>();
-        var findingIsPresent = matchingFindings.Length == 1;
-        var exactRuleVersion = currentRule is not null && currentRule.Version == proposal.RuleVersion;
-        var ruleIsSafe = currentRule?.Procedure is
-            { ManualOnly: false, IsModifying: false, RequiresElevation: false, RequiresUserConfirmation: true };
-        var allowlisted = exactRuleVersion && ruleIsSafe
-            && allowlist.TryGetDefinition(proposal.RuleId, proposal.RuleVersion, out var definition)
-            && definition is not null && definition.Kind == proposal.Kind
-            && definition.PlanVersion == proposal.PlanVersion
-            && definition.OperationVersion == proposal.OperationVersion;
-        var findingMatchesRule = false;
-        if (findingIsPresent && exactRuleVersion && latest!.Report is not null)
+        try
+        {
+            var generationAtStart = evidenceGate.CurrentGeneration;
+            var latest = await history.GetLatestAsync(cancellationToken).ConfigureAwait(false);
+            var rules = await knowledgeRepository.GetLatestRulesAsync(cancellationToken).ConfigureAwait(false);
+            
+            var matchingRules = rules
+                .Where(rule => string.Equals(rule.Id, proposal.RuleId, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            
+            var currentRule = matchingRules.OrderByDescending(rule => rule.Version).FirstOrDefault();
+            
+            var runIsCurrent = latest?.Id == proposal.DiagnosticRunId && latest.Report is not null
+                && proposal.EvidenceGeneration == generationAtStart
+                && evidenceGate.CurrentDiagnosticRunId == proposal.DiagnosticRunId;
+            
+            var matchingFindings = runIsCurrent
+                ? latest!.Report!.Results
+                    .Where(result => result.Status == DiagnosticStatus.Finding
+                    && string.Equals(DiagnosticFindingIdentity.Create(result), proposal.FindingIdentity, StringComparison.Ordinal))
+                    .ToArray()
+                : Array.Empty<DiagnosticResult>();
+            
+            var findingIsPresent = matchingFindings.Length == 1;
+            var exactRuleVersion = currentRule is not null && currentRule.Version == proposal.RuleVersion;
+            var ruleIsSafe = currentRule?.Procedure is
+                { ManualOnly: false, IsModifying: false, RequiresElevation: false, RequiresUserConfirmation: true };
+            
+            var allowlisted = exactRuleVersion && ruleIsSafe
+                && allowlist.TryGetDefinition(proposal.RuleId, proposal.RuleVersion, out var definition)
+                && definition is not null && definition.Kind == proposal.Kind
+                && definition.PlanVersion == proposal.PlanVersion
+                && definition.OperationVersion == proposal.OperationVersion;
+            
+            var findingMatchesRule = await EvaluateFindingMatchAsync(findingIsPresent, exactRuleVersion, latest, proposal, rules).
+ ConfigureAwait(false);
+            
+            var generationStillCurrent = evidenceGate.CurrentGeneration == generationAtStart;
+            
+            return conditions.Select(condition => new RepairConditionResult(condition.Kind, condition.Kind switch
+            {
+                RepairConditionKind.DiagnosticRunIsCurrent => runIsCurrent && generationStillCurrent
+                    ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
+                RepairConditionKind.FindingIsPresent => findingIsPresent && generationStillCurrent
+                    ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
+                RepairConditionKind.RuleVersionIsCurrent => exactRuleVersion && generationStillCurrent
+                    ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
+                RepairConditionKind.FindingMatchesRule => findingMatchesRule && generationStillCurrent
+                    ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
+                RepairConditionKind.RuleIsAllowlisted => allowlisted && generationStillCurrent
+                    ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
+                RepairConditionKind.OriginalExecutionSucceeded => RepairConditionStatus.Failed,
+                _ => RepairConditionStatus.Failed
+            })).ToArray();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger?.LogWarning(exception, "Falha ao avaliar pré-condições de reparo; tipo: {ExceptionType}", exception.GetType().Name);
+            return Array.Empty<RepairConditionResult>();
+        }
+    }
+
+    private async Task<bool> EvaluateFindingMatchAsync(
+        bool findingIsPresent,
+        bool exactRuleVersion,
+        DiagnosticRun? latest,
+        RepairProposal proposal,
+        IReadOnlyList<KnowledgeRule> rules)
+    {
+        if (!findingIsPresent || !exactRuleVersion || latest?.Report is null)
+            return false;
+
+        try
         {
             var currentReport = DiagnosticPrivacyRedactor.RedactReport(latest.Report, latest.Inventory)!;
             var recommendations = recommendationEngine.Recommend(
                 currentReport, rules, DiagnosticPrivacyRedactor.RedactInventory(latest.Inventory));
+            
             foreach (var recommendation in recommendations.Where(recommendation =>
-                         string.Equals(recommendation.RuleId, proposal.RuleId, StringComparison.Ordinal)
-                         && recommendation.RuleVersion == proposal.RuleVersion))
+                string.Equals(recommendation.RuleId, proposal.RuleId, StringComparison.Ordinal)
+                && recommendation.RuleVersion == proposal.RuleVersion))
             {
                 foreach (var evidence in recommendation.Evidence.Where(evidence =>
-                             string.Equals(DiagnosticFindingIdentity.Create(evidence), proposal.FindingIdentity, StringComparison.Ordinal)))
+                    string.Equals(DiagnosticFindingIdentity.Create(evidence), proposal.FindingIdentity, StringComparison.Ordinal)))
                 {
                     var currentEvidence = DiagnosticPrivacyRedactor.RedactText(
                         $"{evidence.ScannerName} · {evidence.Category} · {evidence.Title} · {evidence.Evidence}", latest.Inventory);
+                    
                     var currentEvidenceFingerprint = Convert.ToHexString(
                         SHA256.HashData(Encoding.UTF8.GetBytes(currentEvidence))).ToLowerInvariant();
+                    
                     if (string.Equals(currentEvidence, proposal.RedactedEvidence, StringComparison.Ordinal)
                         && string.Equals(currentEvidenceFingerprint, proposal.EvidenceFingerprint, StringComparison.Ordinal))
-                    {
-                        findingMatchesRule = true;
-                        break;
-                    }
+                        return true;
                 }
-                if (findingMatchesRule) break;
             }
+            
+            return false;
         }
-
-        var generationStillCurrent = evidenceGate.CurrentGeneration == generationAtStart;
-        return conditions.Select(condition => new RepairConditionResult(condition.Kind, condition.Kind switch
+        catch (Exception exception)
         {
-            RepairConditionKind.DiagnosticRunIsCurrent => runIsCurrent && generationStillCurrent
-                ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
-            RepairConditionKind.FindingIsPresent => findingIsPresent && generationStillCurrent
-                ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
-            RepairConditionKind.RuleVersionIsCurrent => exactRuleVersion && generationStillCurrent
-                ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
-            RepairConditionKind.FindingMatchesRule => findingMatchesRule && generationStillCurrent
-                ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
-            RepairConditionKind.RuleIsAllowlisted => allowlisted && generationStillCurrent
-                ? RepairConditionStatus.Verified : RepairConditionStatus.Failed,
-            RepairConditionKind.OriginalExecutionSucceeded => RepairConditionStatus.Failed,
-            _ => RepairConditionStatus.Failed
-        })).ToArray();
+            logger?.LogWarning(exception, "Erro ao avaliar matching de finding; tipo: {ExceptionType}", exception.GetType().Name);
+            return false;
+        }
     }
 }
