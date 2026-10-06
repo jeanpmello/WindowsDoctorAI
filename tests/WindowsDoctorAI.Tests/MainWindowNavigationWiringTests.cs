@@ -12,25 +12,30 @@ public sealed class MainWindowNavigationWiringTests
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "App", name));
 
     [Fact]
-    public void NavigationControlsRemainNamedAndKeyboardAccessible()
+    public void NavigationChoicesCoverEveryRouteAndRemainKeyboardAccessible()
     {
         var document = XDocument.Parse(ReadFixture("MainWindow.xaml"));
         var choices = document.Descendants(Presentation + "RadioButton").ToArray();
-        var names = choices
-            .Select(choice => (string?)choice.Attribute(Xaml + "Name"))
-            .OrderBy(name => name, StringComparer.Ordinal)
+        var routes = choices
+            .Select(choice => (string?)choice.Attribute("Tag"))
+            .OrderBy(route => route, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(new[] { "AboutNavigationButton", "HomeNavigationButton", "SettingsNavigationButton" }, names);
+        Assert.Equal(new[] { "about", "home", "settings" }, routes);
         Assert.All(choices, choice =>
         {
+            Assert.False(string.IsNullOrWhiteSpace((string?)choice.Attribute("Content")));
+            Assert.Equal("MainNavigation", (string?)choice.Attribute("GroupName"));
             Assert.Equal("NavigationButton_Click", (string?)choice.Attribute("Click"));
             Assert.NotEqual("False", (string?)choice.Attribute("IsTabStop"));
         });
 
-        Assert.Single(document.Descendants(Presentation + "Frame"),
-            frame => (string?)frame.Attribute(Xaml + "Name") == "PageFrame");
-        Assert.DoesNotContain(document.Descendants(), element => element.Name.LocalName == "NavigationView");
+        var homeChoice = Assert.Single(choices.Where(choice => (string?)choice.Attribute("Tag") == "home"));
+        Assert.Equal("Inicial", (string?)homeChoice.Attribute("Content"));
+        Assert.Equal("True", (string?)homeChoice.Attribute("IsChecked"));
+        Assert.Single(document.Descendants(Presentation + "Frame")
+            .Where(frame => (string?)frame.Attribute(Xaml + "Name") == "PageFrame"));
+        Assert.Empty(document.Descendants().Where(element => element.Name.LocalName == "NavigationView"));
     }
 
     [Fact]

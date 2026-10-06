@@ -65,6 +65,7 @@ jobs:
             'WindowsDoctorAI.App.exe',
             'WindowsDoctorAI.App.dll',
             'WindowsDoctorAI.App.runtimeconfig.json',
+            'WindowsDoctorAI.App.pri',
             'coreclr.dll',
             'hostfxr.dll',
             'Microsoft.UI.Xaml.dll',
