@@ -32,4 +32,17 @@
   <ItemGroup>
     <Content Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <Target Name="IncludeUnpackagedProjectPriInPublish"
+          BeforeTargets="ComputeResolvedFilesToPublishList"
+          DependsOnTargets="_GenerateProjectPriFile"
+          Condition="'$(WindowsPackageType)' == 'None' and '$(AppxGeneratePriEnabled)' == 'true' and '$(ProjectPriFullPath)' != '' and '$(ProjectPriFileName)' != ''">
+    <Error Condition="!Exists('$(ProjectPriFullPath)')"
+           Text="O publish unpackaged do WinUI exige o arquivo de recursos $(ProjectPriFileName), mas ele não foi gerado." />
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(ProjectPriFullPath)">
+        <RelativePath>$(ProjectPriFileName)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 </Project>

@@ -65,6 +65,7 @@ jobs:
             'WindowsDoctorAI.App.exe',
             'WindowsDoctorAI.App.dll',
             'WindowsDoctorAI.App.runtimeconfig.json',
+            'WindowsDoctorAI.App.pri',
             'coreclr.dll',
             'hostfxr.dll',
             'Microsoft.UI.Xaml.dll',
@@ -126,6 +127,33 @@ jobs:
             throw "Pacote Alpha incompleto; faltam arquivos: $($missingPackageFiles -join ', ')"
           }
           Write-Host "Pacote validado: $($requiredFiles.Count) dependências obrigatórias, PE x64 e sem segredo detectável. O workflow não aplica assinatura própria."
+
+      - name: Smoke test MainWindow XAML no pacote self-contained
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:RUNNER_TEMP 'wdai-alpha-package'
+          $exe = Join-Path $packageDir 'WindowsDoctorAI.App.exe'
+          $resultPath = Join-Path $env:TEMP 'WindowsDoctorAI-xaml-smoke-ci.txt'
+          if (Test-Path $resultPath) { Remove-Item -Path $resultPath -Force }
+
+          $process = Start-Process -FilePath $exe `
+            -ArgumentList @('--xaml-smoke-test', '--xaml-smoke-test-result', $resultPath) `
+            -WorkingDirectory $packageDir -NoNewWindow -PassThru -Wait -ErrorAction Stop
+          $smokeExitCode = $process.ExitCode
+          if (-not (Test-Path $resultPath)) {
+            throw "O smoke test não produziu resultado; o executável terminou com código $smokeExitCode; não houve estágio registrado."
+          }
+
+          $smokeResult = Get-Content -Path $resultPath -Raw
+          if ($smokeResult -notmatch '^PASS:' -and $smokeExitCode -ne 0) {
+            Write-Host $smokeResult.Trim()
+            throw "O smoke test não concluiu com sucesso (exit code $smokeExitCode)."
+          }
+
+          Write-Host $smokeResult.Trim()
+          if ($smokeExitCode -ne 0 -or $smokeResult -notmatch '^PASS:') {
+            throw "Falha no smoke test de MainWindow (exit code $smokeExitCode)."
+          }
 
       - name: Upload Windows 11 x64 Alpha ZIP artifact
         uses: actions/upload-artifact@v4
