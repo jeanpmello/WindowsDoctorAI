@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # Contribuindo
 
 Obrigado pelo interesse no Windows Doctor AI. O `main` contém a aplicação local de diagnóstico e os fluxos descritos no [README](README.md), na [SRS](docs/SRS.md), na [arquitetura](docs/Architecture.md) e no [roadmap](docs/Roadmap.md). Consulte também as [regras do projeto](PROJECT_RULES.md) e as diretrizes de [segurança](docs/Security.md). Código presente e CI verde não significam validação end-to-end ou compatibilidade de produção.
