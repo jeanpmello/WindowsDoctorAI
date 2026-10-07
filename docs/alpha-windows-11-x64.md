@@ -1,6 +1,6 @@
 # Alpha de diagnóstico — Windows 11 x64
 
-Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow `Alpha package (Windows 11 x64)`. O artefato contém a pasta publicada do app e este guia (`README-ALPHA.md`). Não é MSIX nem instalador: não requer Visual Studio, .NET SDK, certificado de desenvolvedor ou identidade de editor no computador de destino. O workflow não cria Release do GitHub nem assina o executável.
+Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow `Alpha package (Windows 11 x64)`. O artefato contém a pasta publicada do app e este guia (`README-ALPHA.md`). Não é MSIX nem instalador: não requer Visual Studio, .NET SDK, certificado de desenvolvedor ou identidade de editor no computador de destino. O workflow não cria Release do GitHub nem assina o executável. Build e testes também rodam automaticamente em pull requests para `main` e em pushes para `main`; nesses eventos, o ZIP Alpha não é empacotado. Para gerar o artefato, use **Run workflow**.
 
 ## Baixar e iniciar
 
