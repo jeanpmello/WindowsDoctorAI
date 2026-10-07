@@ -1,6 +1,6 @@
 # Contribuindo
 
-Obrigado pelo interesse no Windows Doctor AI. O repositório agora contém a solution inicial do Milestone 1, além da documentação do produto. Consulte o [README](README.md), as [regras do projeto](PROJECT_RULES.md), os requisitos em [docs/SRS.md](docs/SRS.md), a arquitetura em [docs/Architecture.md](docs/Architecture.md), o [roadmap](docs/Roadmap.md) e as diretrizes de [segurança](docs/Security.md).
+Obrigado pelo interesse no Windows Doctor AI. O `main` contém a aplicação local de diagnóstico e os fluxos descritos no [README](README.md), na [SRS](docs/SRS.md), na [arquitetura](docs/Architecture.md) e no [roadmap](docs/Roadmap.md). Consulte também as [regras do projeto](PROJECT_RULES.md) e as diretrizes de [segurança](docs/Security.md). Código presente e CI verde não significam validação end-to-end ou compatibilidade de produção.
 
 ## Antes de propor uma mudança
 
@@ -28,7 +28,7 @@ dotnet test .\tests\WindowsDoctorAI.Tests\WindowsDoctorAI.Tests.csproj --configu
 dotnet run --project .\src\WindowsDoctorAI.App\WindowsDoctorAI.App.csproj
 ```
 
-Os testes unitários e de SQLite em memória podem rodar em Linux, mas o compilador XAML do Windows App SDK exige Windows. O teste unitário com fonte simulada não comprova que todas as consultas WMI funcionem em cada edição de Windows/hardware. Registre essas limitações em qualquer proposta.
+O build da solução WinUI 3/XAML e a validação das APIs nativas exigem Windows. Testes unitários e alguns testes de SQLite em memória podem rodar em outros sistemas quando os projetos/alvos permitirem, mas isso não comprova inicialização da UI nem funcionamento de WMI, Registro, Windows Update, Event Viewer, SMART ou Windows Server Backup em cada edição de Windows/hardware. Registre as verificações realmente executadas e suas limitações em qualquer proposta.
 
 ## Contribuições de código
 
@@ -36,3 +36,4 @@ Os testes unitários e de SQLite em memória podem rodar em Linux, mas o compila
 - Não adicione credenciais, segredos ou arquivos de máquina. Confirme `git diff --check` e `git status` antes de enviar.
 - Diagnósticos são somente de leitura por padrão. Não envie dados do dispositivo a terceiros sem consentimento e documentação.
 - Correções futuras devem ser ações catalogadas, com pré-condições, impacto e aprovação explícita por ação.
+
