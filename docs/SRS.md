@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # Especificação de Requisitos de Software (SRS)
 
 **Produto:** Windows Doctor AI Core
