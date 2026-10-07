@@ -1,6 +1,6 @@
 # Alpha de diagnóstico — Windows 11 x64
 
-Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow `Alpha package (Windows 11 x64)`. O artefato contém a pasta publicada do app e este guia (`README-ALPHA.md`). Não é MSIX nem instalador: não requer Visual Studio, .NET SDK, certificado de desenvolvedor ou identidade de editor no computador de destino. O workflow não cria Release do GitHub nem assina o executável.
+Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow `Alpha package (Windows 11 x64)`. O artefato contém a pasta publicada do app e este guia (`README-ALPHA.md`). Não é MSIX nem instalador: não requer Visual Studio, .NET SDK, certificado de desenvolvedor ou identidade de editor no computador de destino. O workflow não cria Release do GitHub nem assina o executável. Build e testes também rodam automaticamente em pull requests para `main` e em pushes para `main`; nesses eventos, o ZIP Alpha não é empacotado. Para gerar o artefato, use **Run workflow**.
 
 ## Baixar e iniciar
 
@@ -20,6 +20,20 @@ Esta é uma Alpha, não uma declaração de compatibilidade de produção. Os sc
 A execução visual da UI, permissões e respostas das APIs do Windows podem variar conforme edição, atualização, hardware e configuração do host. Os testes automatizados e a checagem do pacote no workflow não substituem um smoke test no computador de destino. O projeto ainda usa .NET 9; a [política Microsoft de suporte](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support) indica suporte até novembro de 2026, portanto essa base precisa de acompanhamento para além desse período.
 
 O app é local. A IA não tem provedor ativo, e o inventário não é enviado a um serviço externo. O histórico local de diagnósticos é opt-in e desativado por padrão; dados necessários ao funcionamento podem ser gravados localmente, e relatórios HTML só são salvos se solicitados pela pessoa usuária.
+
+## Verificar somente o XAML da janela
+
+Para testar a inicialização XAML do pacote sem abrir a janela, iniciar inventário ou executar reparos, abra o PowerShell na pasta extraída e rode:
+
+```powershell
+$result = Join-Path $env:TEMP "WindowsDoctorAI-xaml-smoke-$([guid]::NewGuid().ToString('N')).txt"
+& .\WindowsDoctorAI.App.exe --xaml-smoke-test --xaml-smoke-test-result $result
+$exitCode = $LASTEXITCODE
+if (Test-Path $result) { Get-Content -Path $result }
+if ($exitCode -ne 0) { throw "O smoke test falhou (código $exitCode)." }
+```
+
+`PASS` confirma a construção de uma `Window`, a leitura de um `Grid` em memória com `XamlReader.Load` e a construção de AboutPage, SettingsPage, HomePage e MainWindow, incluindo o retorno de `InitializeComponent()` no thread STA real do WinUI. `FAIL` identifica o último estágio, tipo de exceção e HRESULT; nenhuma janela é ativada, e o teste não valida a interface visual nem o comportamento completo de inicialização do aplicativo. O caminho de saída deve ser um `.txt` com prefixo `WindowsDoctorAI-xaml-smoke-` diretamente na pasta temporária do usuário.
 
 ## Enviar feedback
 
