@@ -24,7 +24,7 @@ public static class HomeDashboardFormatter
                 SerialNumber: inventory is null ? "Não coletado" : Text(inventory.SerialNumber),
                 OperatingSystem: inventory is null ? "Não coletado" : $"{Text(inventory.OperatingSystem.Name)} · versão {Text(inventory.OperatingSystem.Version)} · build {Text(inventory.OperatingSystem.Build)}",
                 Processor: inventory is null ? "Não coletado" : $"{Text(inventory.Processor.Name)} · {Text(inventory.Processor.Cores)} núcleos / {Text(inventory.Processor.LogicalProcessors)} processadores lógicos",
-                Memory: inventory is null ? "Não coletado" : (inventory.InstalledMemoryBytes is ulong bytes ? $"{bytes / 1_073_741_824d:N1} GB" : "Indisponível"),
+                Memory: inventory is null ? "Não coletado" : (inventory.InstalledMemoryBytes is ulong missingReportBytes ? $"{missingReportBytes / 1_073_741_824d:N1} GB" : "Indisponível"),
                 Graphics: inventory is null ? "Não coletado" : (inventory.GraphicsAdapters.Count == 0 ? "Indisponível" : string.Join(Environment.NewLine, inventory.GraphicsAdapters.Select(item => item.MemoryBytes is ulong gpuBytes ? $"{item.Name} · {gpuBytes / 1_073_741_824d:N1} GB" : item.Name))),
                 Disks: inventory is null ? "Não coletado" : BuildDiskSummary(inventory),
                 Bios: inventory is null ? "Não coletado" : $"{Text(inventory.Bios.Manufacturer)} · {Text(inventory.Bios.Version)} · série {Text(inventory.Bios.SerialNumber)}",
@@ -32,7 +32,7 @@ public static class HomeDashboardFormatter
                 Tpm: inventory is null ? "Não coletado" : (inventory.Tpm.IsPresent switch { true => $"Presente · versão {Text(inventory.Tpm.SpecificationVersion)} · fabricante {Text(inventory.Tpm.Manufacturer)} · habilitado {BoolText(inventory.Tpm.IsEnabled)} · ativado {BoolText(inventory.Tpm.IsActivated)}", false => "Não detectado", _ => "Indisponível" }),
                 SecureBoot: inventory is null ? "Não coletado" : BoolText(inventory.SecureBootEnabled),
                 UserAndDomain: inventory is null ? "Não coletado" : $"{Text(inventory.UserName)} · domínio/grupo {Text(inventory.Domain)}",
-                Uptime: inventory is null ? "Não coletado" : (inventory.OperatingSystem.Uptime is TimeSpan span ? $"{span.Days}d {span.Hours}h {span.Minutes}min" : "Indisponível"),
+                Uptime: inventory is null ? "Não coletado" : (inventory.OperatingSystem.Uptime is TimeSpan missingReportUptime ? $"{missingReportUptime.Days}d {missingReportUptime.Hours}h {missingReportUptime.Minutes}min" : "Indisponível"),
                 IPv4: inventory is null ? "Nenhum endereço encontrado" : Join(inventory.IPv4Addresses),
                 IPv6: inventory is null ? "Nenhum endereço encontrado" : Join(inventory.IPv6Addresses),
                 NetworkAdapters: inventory is null ? "Não coletado" : (inventory.NetworkAdapters.Count == 0 ? "Indisponível" : string.Join(Environment.NewLine, inventory.NetworkAdapters.Select(adapter => $"{adapter.Name} · {adapter.Description} · {adapter.Status}"))),
@@ -48,7 +48,7 @@ public static class HomeDashboardFormatter
         var healthScore = report.HealthScore is { } score ? score.Value.ToString(CultureInfo.InvariantCulture) : "Não calculado";
         var healthScoreDescription = report.HealthScore is null
             ? "Nenhuma verificação foi confirmada; itens indisponíveis ou não verificados não contam. A pontuação é heurística e não representa a saúde global do computador."
-            : $"Pontuação heurística baseada em {report.VerifiedChecks} verificação(ões) observada(s); {report.UnavailableChecks + report.NotVerifiedChecks} indisponível(is)/não verificad(a|as); {report.Results.Count} resultado(s) estruturado(s).";
+            : $"Pontuação heurística baseada em {report.VerifiedChecks} verificação(ões) confirmada(s), com {report.UnavailableChecks + report.NotVerifiedChecks} checagem(ns) não confirmada(s), em {report.Results.Count} resultado(s). Não representa a saúde global do computador.";
 
         return new HomeDashboardDisplayState(
             ComputerName: inventory is null ? "Não coletado" : Text(inventory.ComputerName),
@@ -142,3 +142,4 @@ public sealed record HomeDashboardDisplayState(
     string CategoriesSummary,
     string FindingsSummary,
     string DiagnosticDurationText);
+
