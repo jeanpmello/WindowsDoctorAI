@@ -1,3 +1,4 @@
+Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # Changelog
 
 Mudanças relevantes do Windows Doctor AI.
@@ -18,7 +19,7 @@ Mudanças relevantes do Windows Doctor AI.
 - Recommendation Engine com correspondências literais, evidências rastreáveis e confiança categórica explicada; nenhuma regra factual pré-semeada.
 - Root Cause Analyzer com associações por identificadores compartilhados; não determina causa ou cronologia.
 - Framework de reparo com confirmação, risco, auditoria e rollback contratual. Nenhum plugin de modificação do Windows está registrado.
-- Serviço local de relatório HTML com resumo, score, evidências, recomendações, referências e histórico; sem PDF ou fluxo de exportação visual.
+- Serviço e ação WinUI para salvar relatório HTML local da execução atual ou mais recente, com resumo, score, evidências, correlações e recomendações correspondentes às regras importadas. O relatório não agrega `RepairHistory` nem histórico de propostas; não há PDF gerado pelo aplicativo.
 - Testes de unidade e SQLite para importação, versão do schema, confiança, correlação, confirmação, histórico e escaping HTML.
 - Metadata `SourceMetadata` normalizado/allowlist para provider do Event Log, matching do piloto por campo estruturado, e redaction uniforme da mensagem bruta em SQLite, UI e HTML; schema do pacote atualizado para 1.2.
 - Coleta local de `Win32_OperatingSystem.ProductType` como enum allowlistado e validação do `BuildNumber` decimal canônico; schema 1.4 exige alvo OS+build para regras novas e a avaliação falha fechado quando o inventário é desconhecido.
@@ -30,3 +31,4 @@ Mudanças relevantes do Windows Doctor AI.
 - Regras importadas e referências são declaradas; o aplicativo não verifica automaticamente sua autenticidade ou validade.
 - WinUI/XAML e APIs Windows continuam dependendo de validação em uma máquina Windows; testes em Linux não comprovam esse comportamento.
 - A edição Enterprise, AI Assistant, timeline, comparação de diagnósticos, dashboard corporativo e reparos reais permanecem no roadmap.
+
