@@ -28,6 +28,12 @@ public partial class App : global::Microsoft.UI.Xaml.Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (XamlSmokeTestRunner.IsRequested)
+        {
+            XamlSmokeTestRunner.Run();
+            return;
+        }
+
         StartupFailureContext.Reset();
         try
         {
