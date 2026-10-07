@@ -1,4 +1,3 @@
-Attempting to perform the InitializeDefaultDrives operation on the 'FileSystem' provider failed.
 # Changelog
 
 Mudanças relevantes do Windows Doctor AI.
