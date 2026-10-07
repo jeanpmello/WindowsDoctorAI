@@ -30,7 +30,7 @@ public sealed record ManualGuidanceAssessment(
     bool KnowledgeBaseIsEmpty,
     IReadOnlyList<ManualGuidanceFinding> Findings);
 
-/// <summary>Cartão redigido por achado, com identidade determinística apenas dentro desta execução.</summary>
+/// <summary>Cartão redigido por achado, vinculado a um run real e à identidade estável compartilhada do finding.</summary>
 public sealed record ManualGuidanceFinding(
     string RunReferenceText,
     string FindingIdentityText,
@@ -41,7 +41,14 @@ public sealed record ManualGuidanceFinding(
     ManualGuidanceFindingStatus Status,
     string StatusText,
     IReadOnlyList<ManualGuidanceRecommendation> Recommendations,
-    IReadOnlyList<ManualGuidanceIncompleteCandidate> IncompleteCandidates);
+    IReadOnlyList<ManualGuidanceIncompleteCandidate> IncompleteCandidates)
+{
+    /// <summary>Run real ao qual este cartão foi projetado; usado para rejeitar snapshots de outra execução.</summary>
+    public required Guid DiagnosticRunId { get; init; }
+
+    /// <summary>Identidade estável compatível com DiagnosticFindingIdentity.Create para o achado redigido.</summary>
+    public required string FindingIdentity { get; init; }
+}
 
 /// <summary>Orientação declarada, sempre ManualOnly e jamais executada por esta projeção.</summary>
 public sealed record ManualGuidanceRecommendation(

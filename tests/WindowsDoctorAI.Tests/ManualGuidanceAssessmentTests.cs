@@ -352,6 +352,13 @@ public sealed class ManualGuidanceAssessmentTests
         Assert.Equal(firstIdentity, assessment.Findings[1].FindingIdentityText);
         Assert.Equal(assessment.Findings.Select(item => item.FindingIdentityText),
             repeatedAssessment.Findings.Select(item => item.FindingIdentityText));
+        var redactedRun = DiagnosticPrivacyRedactor.Redact(run);
+        Assert.All(assessment.Findings, finding =>
+        {
+            Assert.Equal(run.Id, finding.DiagnosticRunId);
+            Assert.Contains(redactedRun.Report!.Results,
+                result => string.Equals(DiagnosticFindingIdentity.Create(result), finding.FindingIdentity, StringComparison.Ordinal));
+        });
         Assert.NotEqual(firstIdentity, otherRun.Findings[0].FindingIdentityText);
         Assert.Contains("f1-", firstIdentity, StringComparison.Ordinal);
         Assert.DoesNotContain("alpha-secret", firstIdentity, StringComparison.Ordinal);

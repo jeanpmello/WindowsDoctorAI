@@ -21,9 +21,11 @@
     <ProjectReference Include="../../src/WindowsDoctorAI.Database/WindowsDoctorAI.Database.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.Reporting/WindowsDoctorAI.Reporting.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.Repair/WindowsDoctorAI.Repair.csproj" />
+    <ProjectReference Include="../../src/WindowsDoctorAI.AI/WindowsDoctorAI.AI.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/WindowsDoctorAI.App/HomeViewModel.cs" Link="App/HomeViewModel.cs" />
+    <Compile Include="../../src/WindowsDoctorAI.App/HomeViewModel.Ai.cs" Link="App/HomeViewModel.Ai.cs" />
     <Compile Include="../../src/WindowsDoctorAI.App/StartupFailureDetails.cs" Link="App/StartupFailureDetails.cs" />
     <Compile Include="../../src/WindowsDoctorAI.App/NavigationService.cs" Link="App/NavigationService.cs" />
   </ItemGroup>

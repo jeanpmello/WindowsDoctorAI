@@ -2,6 +2,7 @@ using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
+using WindowsDoctorAI.AI;
 using WindowsDoctorAI.Application;
 using WindowsDoctorAI.Core;
 using WindowsDoctorAI.Domain;
@@ -20,8 +21,10 @@ internal partial class HomeViewModel(
     IBackupSetCatalogSource backupSetCatalogSource,
     ILogger<HomeViewModel> logger,
     RepairProposalBuilder? repairProposalBuilder = null,
-    RepairEngine? repairEngine = null) : ObservableObject
+    RepairEngine? repairEngine = null,
+    IDiagnosticAiProvider? aiProvider = null) : ObservableObject
 {
+    private readonly IDiagnosticAiProvider? _aiProvider = aiProvider;
     private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
 
     [ObservableProperty] private bool _isScanning;
@@ -419,17 +422,20 @@ internal partial class HomeViewModel(
         ResetCbsLogAnalysis("A observação CBS é independente do diagnóstico e não será associada a evento algum.");
         UpdateCbsLogCommandState();
         _displayedRunIsPrevious = _currentRun is not null;
+        ClearAiAnswer();
         IsScanning = true;
         StatusMessage = "Coletando inventário e verificações locais somente de leitura. Nenhuma correção será aplicada.";
         try
         {
             var outcome = await runDiagnostic.ExecuteAsync();
+            CancelAiForContextChange();
             _currentRun = outcome.Run;
             _displayedRunIsPrevious = false;
             await RefreshManualGuidanceAsync(outcome.Run);
             await RefreshRepairProposalsAsync(outcome.Run);
             UpdateCbsLogCommandState();
             CanExportHtmlReport = true;
+            RefreshAiState();
             DisplayDashboard(outcome.Run.Report, outcome.Run.Duration, outcome.Run.Inventory);
             LastDiagnosticText = $"Concluído às {outcome.Run.CompletedAtUtc.ToLocalTime():G}";
             StatusMessage = outcome.PersistenceWarning ?? (outcome.HistorySaved
@@ -444,6 +450,7 @@ internal partial class HomeViewModel(
                 : "A tentativa mais recente falhou; nenhum diagnóstico concluído está carregado nesta sessão.";
             ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
             ManualGuidanceStatus = "Avaliação incompleta: a nova execução diagnóstica falhou. Nenhuma conclusão sobre a condição do computador foi produzida.";
+            RefreshAiState();
             StatusMessage = DiagnosticPrivacyMessages.DiagnosticFailure(exception);
         }
         finally
@@ -471,8 +478,10 @@ internal partial class HomeViewModel(
             var latest = await history.GetLatestAsync(cancellationToken);
             if (latest is null)
             {
+                CancelAiForContextChange();
                 _currentRun = null;
                 _displayedRunIsPrevious = false;
+                RefreshAiState();
                 ManualGuidanceStatus = "Nenhuma execução diagnóstica carregada para avaliar orientações manuais.";
                 RepairProposalStatus = "Nenhum plano disponível: não há uma execução diagnóstica atual salva para revalidar.";
                 LastDiagnosticText = "Nenhum diagnóstico anterior encontrado no histórico local.";
@@ -480,11 +489,13 @@ internal partial class HomeViewModel(
                 StatusMessage = "Nenhum diagnóstico anterior encontrado no histórico local. Execute um diagnóstico para ver resultados.";
                 return;
             }
+            CancelAiForContextChange();
             _currentRun = latest;
             _displayedRunIsPrevious = false;
             await RefreshManualGuidanceAsync(latest, cancellationToken);
             await RefreshRepairProposalsAsync(latest, cancellationToken);
             CanExportHtmlReport = true;
+            RefreshAiState();
             DisplayDashboard(latest.Report, latest.Duration, latest.Inventory);
             LastDiagnosticText = $"Concluído às {latest.CompletedAtUtc.ToLocalTime():G}";
             StatusMessage = latest.Report is null
@@ -498,6 +509,7 @@ internal partial class HomeViewModel(
             FindingsSummary = "Não foi possível carregar resultados do histórico local.";
             ManualGuidanceFindings = Array.Empty<ManualGuidanceFinding>();
             ManualGuidanceStatus = "Avaliação incompleta: o histórico local está indisponível; nenhuma conclusão sobre a condição do sistema é possível.";
+            RefreshAiState();
             StatusMessage = DiagnosticPrivacyMessages.HistoryLoadFailure(exception);
         }
         finally

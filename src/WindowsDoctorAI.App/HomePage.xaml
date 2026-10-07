@@ -318,6 +318,23 @@
                 </Border>
             </Grid>
 
+            <Border Style="{StaticResource InventoryCardStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Análise por IA local (Ollama)" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBlock Text="Ao iniciar a análise, o app envia ao Ollama local o prompt completo exibido na prévia, que pode incluir orientações ManualOnly únicas associadas a achados, com fontes apenas declaradas e não autenticadas. Identificadores conhecidos são redigidos, sem garantia de anonimização completa; o app não controla o processamento ou armazenamento do serviço local. A IA é consultiva, não executa correções e pode errar: confira a orientação na fonte antes de agir." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Content="Analisar com IA local" Command="{Binding AnalyzeWithAiCommand}" IsEnabled="{Binding CanAnalyzeWithAi}" Style="{StaticResource AccentButtonStyle}" />
+                        <Button Content="Cancelar" Command="{Binding CancelAiAnalysisCommand}" IsEnabled="{Binding IsAnalyzingWithAi}" />
+                        <ProgressRing IsActive="{Binding IsAnalyzingWithAi}" Width="24" Height="24" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding AiStatusText}" TextWrapping="Wrap" FontSize="12" />
+                    <TextBlock Text="{Binding AiAnswerText}" Style="{StaticResource FieldValueStyle}" />
+                    <Expander Header="Conferir os dados, orientações e instruções enviados ao Ollama local" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <TextBox Text="{Binding AiPromptPreview, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="320" />
+                    </Expander>
+                </StackPanel>
+            </Border>
+
             <TextBlock Text="Informações do computador" Style="{StaticResource SectionTitleStyle}" />
             <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="16">
                 <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource InventoryCardStyle}">
