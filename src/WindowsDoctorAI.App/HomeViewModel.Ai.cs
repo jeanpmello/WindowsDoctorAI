@@ -81,6 +81,24 @@ internal partial class HomeViewModel
         }
     }
 
+    partial void OnIsScanningChanged(bool value)
+    {
+        if (value)
+        {
+            CancelAiForContextChange("Análise cancelada porque um novo diagnóstico está sendo executado.");
+            _aiPromptSnapshot = null;
+            AiPromptPreview = string.Empty;
+            ClearAiAnswer();
+            AiStatusText = "Análise de IA indisponível enquanto um novo diagnóstico está sendo executado.";
+        }
+        else if (_aiPromptSnapshot is null && _currentRun is not null)
+        {
+            AiStatusText = "Análise desabilitada: não há um snapshot válido para a execução atual.";
+        }
+
+        SetCanAnalyze(_currentRun is not null);
+    }
+
     partial void OnIsLoadingHistoryChanged(bool value)
     {
         if (value)
