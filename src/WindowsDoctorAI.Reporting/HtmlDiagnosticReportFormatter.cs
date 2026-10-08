@@ -49,7 +49,7 @@ public sealed class HtmlDiagnosticReportFormatter
         {
             builder.Append("<p class=\"score\">Health Score: ").Append(report.HealthScore is { } score ? E(score.Value.ToString()) : "Não calculado").AppendLine("</p>");
             builder.Append("<p>").Append(report.VerifiedChecks).Append(" verificações confirmadas; ").Append(report.CriticalProblems).Append(" problemas críticos; ").Append(report.Warnings).Append(" avisos; ").Append(report.UnavailableChecks).Append(" indisponíveis; ").Append(report.NotVerifiedChecks).AppendLine(" não verificadas.</p>");
-            builder.AppendLine("<p class=\"muted\">O Health Score é heurístico e não mede saúde global. Estados indisponíveis ou não verificados não são contabilizados como saudáveis.</p>");
+            builder.AppendLine("<p class=\"muted\">O Health Score é heurístico, penaliza uma vez cada tipo distinto de achado (scanner, categoria e título), e não mede saúde global. Ocorrências repetidas continuam listadas; estados indisponíveis ou não verificados não contam como saudáveis.</p>");
         }
         builder.AppendLine("</section>");
 
