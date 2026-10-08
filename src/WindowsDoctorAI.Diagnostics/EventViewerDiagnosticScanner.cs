@@ -67,7 +67,11 @@ public sealed class EventViewerDiagnosticScanner(IWindowsDiagnosticDataSource da
                 $"{label} · {item.Provider} · evento {item.EventId}", description,
                 "Investigue a origem e o contexto do evento antes de agir; o scanner não modifica a configuração do Windows.",
                 $"Log={logName}; provedor={item.Provider}; ID={item.EventId}; nível={label}; data={occurredAt}.");
-            results.Add(result with { SourceMetadata = DiagnosticSourceMetadata.FromEventProvider(item.Provider) });
+            results.Add(result with
+            {
+                Timestamp = item.Timestamp ?? result.Timestamp,
+                SourceMetadata = DiagnosticSourceMetadata.FromEventProvider(item.Provider)
+            });
         }
     }
 

@@ -11,6 +11,7 @@ Mudanças relevantes do Windows Doctor AI.
 ### Melhorias do diagnóstico
 
 - Health Score penaliza cada tipo distinto de achado uma vez, evitando que ocorrências repetidas do mesmo evento saturem a nota; todas as ocorrências continuam nos resultados.
+- A identidade redigida do Event Viewer passa a incluir o timestamp real do evento apenas no hash, reduzindo a fusão de registros distintos com o mesmo ID sem persistir ou exibir mensagens brutas. O timestamp do resultado passa a refletir quando o evento ocorreu.
 
 ### Hotfix local — 0x800F0831 / CBS sem correlação
 

@@ -10,26 +10,52 @@ public static class DiagnosticFindingIdentity
     {
         ArgumentNullException.ThrowIfNull(finding);
         return Create(finding.ScannerName, finding.Category, finding.Title, finding.Evidence,
-            finding.SourceMetadata?.Provider);
+            finding.SourceMetadata?.Provider, EventOccurrenceTimestamp(finding.ScannerName, finding.Timestamp));
     }
 
     public static string Create(RecommendationEvidence evidence)
     {
         ArgumentNullException.ThrowIfNull(evidence);
         return Create(evidence.ScannerName, evidence.Category, evidence.Title, evidence.Evidence,
-            evidence.SourceProvider);
+            evidence.SourceProvider, EventOccurrenceTimestamp(evidence.ScannerName, evidence.TimestampUtc));
     }
 
-    private static string Create(string scanner, string category, string title, string evidence, string? provider)
+    private static string Create(
+        string scanner,
+        string category,
+        string title,
+        string evidence,
+        string? provider,
+        DateTimeOffset? occurrenceTimestampUtc)
     {
-        var payload = JsonSerializer.SerializeToUtf8Bytes(new
-        {
-            Scanner = DiagnosticPrivacyRedactor.RedactText(scanner).Trim(),
-            Category = DiagnosticPrivacyRedactor.RedactText(category).Trim(),
-            Title = DiagnosticPrivacyRedactor.RedactText(title).Trim(),
-            Evidence = DiagnosticPrivacyRedactor.RedactText(evidence).Trim(),
-            Provider = DiagnosticSourceMetadata.NormalizeProvider(provider)
-        });
+        var safeScanner = DiagnosticPrivacyRedactor.RedactText(scanner).Trim();
+        var safeCategory = DiagnosticPrivacyRedactor.RedactText(category).Trim();
+        var safeTitle = DiagnosticPrivacyRedactor.RedactText(title).Trim();
+        var safeEvidence = DiagnosticPrivacyRedactor.RedactText(evidence).Trim();
+        var safeProvider = DiagnosticSourceMetadata.NormalizeProvider(provider);
+        var payload = occurrenceTimestampUtc is null
+            ? JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Scanner = safeScanner,
+                Category = safeCategory,
+                Title = safeTitle,
+                Evidence = safeEvidence,
+                Provider = safeProvider
+            })
+            : JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                Scanner = safeScanner,
+                Category = safeCategory,
+                Title = safeTitle,
+                Evidence = safeEvidence,
+                Provider = safeProvider,
+                OccurrenceTimestampUtc = occurrenceTimestampUtc.Value
+            });
         return Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
     }
+
+    private static DateTimeOffset? EventOccurrenceTimestamp(string scanner, DateTimeOffset timestamp) =>
+        string.Equals(scanner, "Event Viewer", StringComparison.OrdinalIgnoreCase)
+            ? timestamp.ToUniversalTime()
+            : null;
 }
