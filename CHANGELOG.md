@@ -4,6 +4,10 @@ Mudanças relevantes do Windows Doctor AI.
 
 ## [Unreleased] — Milestone 3: Knowledge & Repair Platform
 
+### Ajuste do Health Score
+
+- Achados do Event Viewer permanecem nos detalhes, mas deixam de penalizar a nota sozinhos; a pontuação usa achados distintos dos demais scanners porque registros de log isolados não confirmam problemas ativos.
+
 ### Melhorias do diagnóstico
 
 - Health Score penaliza cada tipo distinto de achado uma vez, evitando que ocorrências repetidas do mesmo evento saturem a nota; todas as ocorrências continuam nos resultados.

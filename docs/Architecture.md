@@ -26,7 +26,7 @@ As dependências continuam apontando para contratos e domínio. `Domain` não co
 
 ## Diagnóstico e Health Score
 
-`DiagnosticResult` representa a coleta dos scanners; `Unavailable` e `NotVerified` não são estados saudáveis. `SourceMetadata` mantém separadamente providers de evento conhecidos e normalizados; neste incremento, apenas `WindowsUpdateClient` é allowlist. O Health Score é heurístico: 100 menos 25 por tipo distinto de achado crítico e 8 por tipo distinto de aviso (scanner, categoria e título), limitado a 0–100. Ocorrências continuam nos resultados, mas a repetição não penaliza a nota novamente. A nota não é calculada quando não há verificações confirmadas e não mede saúde global.
+`DiagnosticResult` representa a coleta dos scanners; `Unavailable` e `NotVerified` não são estados saudáveis. `SourceMetadata` mantém separadamente providers de evento conhecidos e normalizados; neste incremento, apenas `WindowsUpdateClient` é allowlist. O Health Score é heurístico: considera apenas verificações confirmadas por scanners diferentes do Event Viewer e penaliza uma vez cada tipo distinto de achado (scanner, categoria e título), com 25 pontos por tipo crítico e 8 por tipo de aviso, limitado a 0–100. Eventos do Event Viewer permanecem nos resultados para contexto, mas não alteram a nota por si sós porque registros isolados não confirmam problemas ativos. Sem verificações confirmadas por outros scanners, a nota não é calculada. A pontuação não mede saúde global.
 
 Os plugins existentes consultam Windows Update, Services, Drivers, Disk, Event Viewer e Windows Server Backup em modo de leitura. Os limites específicos de APIs, permissões, SMART, cobertura e volume permanecem descritos nos resultados e na documentação do Milestone 2.
 

@@ -10,6 +10,7 @@ public sealed class DiagnosticEngine : IDiagnosticEngine
 {
     private const int CriticalPenalty = 25;
     private const int WarningPenalty = 8;
+    private const string EventViewerScannerName = "Event Viewer";
     private readonly IReadOnlyList<IDiagnosticScanner> _scanners;
     private readonly ILogger<DiagnosticEngine> _logger;
 
@@ -161,11 +162,16 @@ public sealed class DiagnosticEngine : IDiagnosticEngine
 
     private static HealthScore? CalculateHealthScore(IReadOnlyCollection<DiagnosticResult> results)
     {
-        if (!results.Any(result => result.Status is DiagnosticStatus.Healthy or DiagnosticStatus.Finding)) return null;
-        // Event Viewer can report many occurrences of the same issue. Keep every occurrence
-        // in the report, but count each finding type once so log volume alone cannot saturate the score.
-        var critical = CountDistinctFindingTypes(results, DiagnosticSeverity.Critical);
-        var warnings = CountDistinctFindingTypes(results, DiagnosticSeverity.Warning);
+        // Event log entries provide historical context, but by themselves do not confirm an active
+        // issue. Keep them in the report while basing the score on verified checks from other scanners.
+        var scoreableResults = results
+            .Where(result => !string.Equals(result.ScannerName, EventViewerScannerName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (!scoreableResults.Any(result => result.Status is DiagnosticStatus.Healthy or DiagnosticStatus.Finding)) return null;
+
+        // Repeated observations of the same finding type remain visible, but count once in the heuristic.
+        var critical = CountDistinctFindingTypes(scoreableResults, DiagnosticSeverity.Critical);
+        var warnings = CountDistinctFindingTypes(scoreableResults, DiagnosticSeverity.Warning);
         var score = Math.Max(0L, 100L - (long)critical * CriticalPenalty - (long)warnings * WarningPenalty);
         return new HealthScore((int)score);
     }
