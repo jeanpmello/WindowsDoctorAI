@@ -48,7 +48,7 @@ public static class HomeDashboardFormatter
         var healthScore = report.HealthScore is { } score ? score.Value.ToString(CultureInfo.InvariantCulture) : "Não calculado";
         var healthScoreDescription = report.HealthScore is null
             ? "Nenhuma verificação foi confirmada; itens indisponíveis ou não verificados não contam. A pontuação é heurística e não representa a saúde global do computador."
-            : $"Pontuação heurística baseada em {report.VerifiedChecks} verificação(ões) confirmada(s), com {report.UnavailableChecks + report.NotVerifiedChecks} checagem(ns) não confirmada(s), em {report.Results.Count} resultado(s). Não representa a saúde global do computador.";
+            : $"Pontuação heurística por tipo de achado distinto (scanner, categoria e título); ocorrências repetidas continuam nos resultados, mas não reduzem a nota novamente. Há {report.VerifiedChecks} verificação(ões) confirmada(s), {report.UnavailableChecks + report.NotVerifiedChecks} não confirmada(s) e {report.Results.Count} resultado(s). Não representa a saúde global do computador.";
 
         return new HomeDashboardDisplayState(
             ComputerName: inventory is null ? "Não coletado" : Text(inventory.ComputerName),
