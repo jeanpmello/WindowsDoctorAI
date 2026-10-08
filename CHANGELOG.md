@@ -4,6 +4,10 @@ Mudanças relevantes do Windows Doctor AI.
 
 ## [Unreleased] — Milestone 3: Knowledge & Repair Platform
 
+### Melhorias do diagnóstico
+
+- Health Score penaliza cada tipo distinto de achado uma vez, evitando que ocorrências repetidas do mesmo evento saturem a nota; todas as ocorrências continuam nos resultados.
+
 ### Hotfix local — 0x800F0831 / CBS sem correlação
 
 - Suprimido Finding para o HRESULT `0x800F0831`; regras de conhecimento com esse código são rejeitadas e a recomendação permanece bloqueada.
