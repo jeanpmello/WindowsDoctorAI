@@ -162,11 +162,25 @@ public sealed class DiagnosticEngine : IDiagnosticEngine
     private static HealthScore? CalculateHealthScore(IReadOnlyCollection<DiagnosticResult> results)
     {
         if (!results.Any(result => result.Status is DiagnosticStatus.Healthy or DiagnosticStatus.Finding)) return null;
-        var critical = results.Count(result => result.Status == DiagnosticStatus.Finding && result.Severity == DiagnosticSeverity.Critical);
-        var warnings = results.Count(result => result.Status == DiagnosticStatus.Finding && result.Severity == DiagnosticSeverity.Warning);
+        // Event Viewer can report many occurrences of the same issue. Keep every occurrence
+        // in the report, but count each finding type once so log volume alone cannot saturate the score.
+        var critical = CountDistinctFindingTypes(results, DiagnosticSeverity.Critical);
+        var warnings = CountDistinctFindingTypes(results, DiagnosticSeverity.Warning);
         var score = Math.Max(0L, 100L - (long)critical * CriticalPenalty - (long)warnings * WarningPenalty);
         return new HealthScore((int)score);
     }
+
+    private static int CountDistinctFindingTypes(IReadOnlyCollection<DiagnosticResult> results, DiagnosticSeverity severity) =>
+        results
+            .Where(result => result.Status == DiagnosticStatus.Finding && result.Severity == severity)
+            .Select(result => (
+                Scanner: NormalizeFindingKey(result.ScannerName),
+                Category: NormalizeFindingKey(result.Category),
+                Title: NormalizeFindingKey(result.Title)))
+            .Distinct()
+            .Count();
+
+    private static string NormalizeFindingKey(string? value) => (value ?? string.Empty).Trim().ToUpperInvariant();
 
     private static class DiagnosticResultFactoryForEngine
     {
