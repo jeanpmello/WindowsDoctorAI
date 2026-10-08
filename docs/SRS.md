@@ -1,8 +1,8 @@
 # Especificação de Requisitos de Software (SRS)
 
 **Produto:** Windows Doctor AI Core
-**Versão:** 0.2
-**Estado:** baseline de requisitos alinhada ao `main` em 7 de outubro de 2026. Este documento descreve escopo e limites conhecidos; não certifica compatibilidade, segurança ou prontidão para produção.
+**Versão:** 0.3
+**Estado:** baseline de requisitos alinhada ao `main` em 8 de outubro de 2026. Este documento descreve escopo e limites conhecidos; não certifica compatibilidade, segurança ou prontidão para produção.
 
 ## 1. Objetivo e público
 
@@ -17,6 +17,7 @@ O Windows Doctor AI Core é um aplicativo desktop local para técnicos que preci
 - Importação deliberada de pacotes JSON de conhecimento com validação e prévia, recomendações explicáveis e correlações observacionais.
 - Exportação local de relatório HTML da execução atual ou mais recente.
 - Framework de reparo com confirmação e auditoria, sem plugin de alteração do Windows registrado na composição atual.
+- Assistente de texto opcional via Ollama local, com endpoint restrito a loopback, prévia do prompt para análise real e teste sintético sem dados do computador.
 
 Consulte [Arquitetura](Architecture.md), [Roadmap](Roadmap.md), [Segurança](Security.md) e [Banco de dados](Database.md) para contratos, limites e detalhes. A [Alpha](alpha-windows-11-x64.md) descreve a distribuição atualmente documentada.
 
@@ -37,13 +38,20 @@ Consulte [Arquitetura](Architecture.md), [Roadmap](Roadmap.md), [Segurança](Sec
 4. Recomendações devem expor a correspondência e suas evidências, distinguindo força do match de probabilidade de causa ou sucesso.
 5. Orientações que possam modificar o computador devem permanecer manuais até que uma ação específica, suas pré-condições, riscos, consentimento e validação sejam implementados e revisados.
 
+### Assistente de IA local
+
+1. O teste de IA deve confirmar disponibilidade e geração com dados sintéticos, sem anexar inventário ou execução diagnóstica.
+2. Para análise real, a aplicação deve exibir o texto exato antes do envio e solicitar ação explícita da pessoa usuária.
+3. O provedor deve recusar destinos que não sejam loopback e não pode executar comandos, reparar o computador ou afirmar causa definitiva.
+4. Respostas são consultivas e podem estar erradas. O aplicativo deve instruir a conferência humana e mostrar limitações de redação e retenção do serviço local.
+
 ### Histórico, relatórios e privacidade
 
 1. O histórico de diagnóstico deve permanecer local e opt-in, com novas gravações redigidas.
 2. Retenção por idade e exclusão integral do histórico devem exigir confirmação explícita.
 3. Relatórios HTML devem codificar texto não confiável, evitar recursos remotos e ser salvos somente por ação deliberada.
 4. O aplicativo deve informar que relatórios exportados ficam fora da retenção do banco e que SQLite não fornece, por si só, criptografia em repouso ou apagamento físico seguro.
-5. Dados do dispositivo não devem ser enviados a serviços externos no escopo atual do `main`.
+5. Inventário/diagnósticos não são enviados a serviços externos. A análise por IA só envia o prompt revisto a um processo Ollama em loopback, quando a pessoa seleciona essa ação.
 
 ### Segurança de reparo
 
@@ -54,7 +62,7 @@ Consulte [Arquitetura](Architecture.md), [Roadmap](Roadmap.md), [Segurança](Sec
 
 ## 4. Fora do escopo atual
 
-- Provedor de IA ativo no `main`. A proposta de integração com Ollama está em PR aberto e não faz parte do comportamento integrado.
+- Provedores de IA remotos/cloud e análise sem ação explícita da pessoa usuária.
 - Plugin que modifique o Windows, restauração real de backup ou execução de comandos de reparo.
 - PDF gerado pelo aplicativo, timeline confiável, comparação de diagnósticos ou determinação causal.
 - Agente, servidor, identidade, autorização, isolamento multi-tenant, sincronização ou dashboard Enterprise.

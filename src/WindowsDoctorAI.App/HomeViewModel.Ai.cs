@@ -20,7 +20,10 @@ internal partial class HomeViewModel
     [ObservableProperty] private string _aiAnswerText = string.Empty;
     [ObservableProperty] private string _aiPromptPreview = string.Empty;
     [ObservableProperty] private bool _isAnalyzingWithAi;
+    [ObservableProperty] private bool _isTestingAi;
+    [ObservableProperty] private bool _isAiOperationRunning;
     [ObservableProperty] private bool _canAnalyzeWithAi;
+    [ObservableProperty] private bool _canTestAi;
 
     /// <summary>Chamado sempre que a execução atual muda; calcula e guarda a requisição exata exibida na prévia.</summary>
     internal void RefreshAiState()
@@ -33,6 +36,7 @@ internal partial class HomeViewModel
             AiPromptPreview = string.Empty;
             AiStatusText = "Nenhum provedor de IA está registrado nesta build.";
             SetCanAnalyze(false);
+            SetCanTestAi();
             return;
         }
 
@@ -42,6 +46,7 @@ internal partial class HomeViewModel
             AiPromptPreview = string.Empty;
             AiStatusText = AiIdleStatus;
             SetCanAnalyze(false);
+            SetCanTestAi();
             return;
         }
 
@@ -51,6 +56,7 @@ internal partial class HomeViewModel
         AiPromptPreview = $"[Instruções ao modelo]\n{request.SystemPrompt}\n\n[Dados do diagnóstico e orientações ManualOnly (identificadores conhecidos redigidos; fontes não autenticadas)]\n{request.UserPrompt}";
         AiStatusText = $"Pronto. {request.TotalCharacters:N0} caracteres serão enviados pelo app ao endpoint Ollama configurado em loopback neste computador.";
         SetCanAnalyze(true);
+        SetCanTestAi();
     }
 
     private void ClearAiAnswer() => AiAnswerText = string.Empty;
@@ -63,9 +69,22 @@ internal partial class HomeViewModel
             && _aiPromptSnapshot is not null
             && ReferenceEquals(_aiPromptSnapshot.Run, _currentRun)
             && !IsAnalyzingWithAi
+            && !IsTestingAi
+            && !IsAiOperationRunning
             && !IsScanning
             && !IsLoadingHistory;
         AnalyzeWithAiCommand.NotifyCanExecuteChanged();
+    }
+
+    private void SetCanTestAi()
+    {
+        CanTestAi = _aiProvider is not null
+            && !IsTestingAi
+            && !IsAnalyzingWithAi
+            && !IsAiOperationRunning
+            && !IsScanning
+            && !IsLoadingHistory;
+        TestAiCommand.NotifyCanExecuteChanged();
     }
 
     internal void CancelAiForContextChange(string? status = null)
@@ -75,6 +94,10 @@ internal partial class HomeViewModel
         _aiCancellation = null;
         cancellation?.Cancel();
         IsAnalyzingWithAi = false;
+        IsTestingAi = false;
+        IsAiOperationRunning = false;
+        SetCanAnalyze(_currentRun is not null);
+        SetCanTestAi();
         if (status is not null)
         {
             AiStatusText = status;
@@ -99,6 +122,7 @@ internal partial class HomeViewModel
         }
 
         SetCanAnalyze(_currentRun is not null);
+        SetCanTestAi();
     }
 
     private bool CanRunAiAnalysis() => _aiProvider is not null
@@ -106,6 +130,7 @@ internal partial class HomeViewModel
         && _aiPromptSnapshot is not null
         && ReferenceEquals(_aiPromptSnapshot.Run, _currentRun)
         && !IsAnalyzingWithAi
+        && !IsTestingAi
         && !IsScanning
         && !IsLoadingHistory;
 
@@ -135,7 +160,9 @@ internal partial class HomeViewModel
         var operationId = ++_aiOperationId;
 
         IsAnalyzingWithAi = true;
+        IsAiOperationRunning = true;
         SetCanAnalyze(false);
+        SetCanTestAi();
         ClearAiAnswer();
         try
         {
@@ -188,7 +215,9 @@ internal partial class HomeViewModel
             {
                 _aiCancellation = null;
                 IsAnalyzingWithAi = false;
+                IsAiOperationRunning = false;
                 SetCanAnalyze(_currentRun is not null);
+                SetCanTestAi();
             }
 
             cancellation.Dispose();
@@ -197,4 +226,84 @@ internal partial class HomeViewModel
 
     [RelayCommand]
     private void CancelAiAnalysis() => _aiCancellation?.Cancel();
+
+    private bool CanTestAiLocally() => _aiProvider is not null
+        && !IsTestingAi
+        && !IsAnalyzingWithAi
+        && !IsAiOperationRunning
+        && !IsScanning
+        && !IsLoadingHistory;
+
+    private bool IsCurrentAiTestOperation(int operationId, CancellationTokenSource cancellation) =>
+        operationId == _aiOperationId
+        && ReferenceEquals(_aiCancellation, cancellation)
+        && !IsScanning
+        && !IsLoadingHistory;
+
+    /// <summary>Confirma conectividade e geração do modelo usando texto sintético, sem enviar dados do computador.</summary>
+    [RelayCommand(CanExecute = nameof(CanTestAiLocally))]
+    private async Task TestAiAsync()
+    {
+        var provider = _aiProvider;
+        if (provider is null || IsScanning || IsLoadingHistory)
+        {
+            return;
+        }
+
+        _aiCancellation?.Cancel();
+        _aiCancellation?.Dispose();
+        var cancellation = _aiCancellation = new CancellationTokenSource();
+        var operationId = ++_aiOperationId;
+        IsTestingAi = true;
+        IsAiOperationRunning = true;
+        SetCanAnalyze(_currentRun is not null);
+        SetCanTestAi();
+        ClearAiAnswer();
+
+        try
+        {
+            AiStatusText = "Verificando o Ollama local. Nenhum dado do computador será enviado.";
+            var availability = await provider.CheckAvailabilityAsync(cancellation.Token);
+            if (!IsCurrentAiTestOperation(operationId, cancellation)) return;
+            if (!availability.IsReady)
+            {
+                AiStatusText = availability.Message;
+                return;
+            }
+
+            AiStatusText = $"Ollama disponível ({availability.Model}). Testando uma resposta sintética, sem diagnóstico do computador...";
+            var request = new AiAnalysisRequest(
+                "Responda em português brasileiro, com uma única frase curta. Este é um teste técnico sintético. Não sugira ações no computador.",
+                "Responda exatamente: IA local pronta.");
+            var result = await provider.AnalyzeAsync(request, cancellation.Token);
+            if (!IsCurrentAiTestOperation(operationId, cancellation)) return;
+
+            if (result.IsSuccess)
+            {
+                AiAnswerText = result.Text!;
+                AiStatusText = $"Teste concluído com {result.Model}. Só uma mensagem sintética foi enviada; nenhum dado do diagnóstico foi incluído.";
+            }
+            else
+            {
+                AiStatusText = result.Message;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (IsCurrentAiTestOperation(operationId, cancellation)) AiStatusText = "Teste da IA cancelado.";
+        }
+        finally
+        {
+            if (_aiOperationId == operationId && ReferenceEquals(_aiCancellation, cancellation))
+            {
+                _aiCancellation = null;
+                IsTestingAi = false;
+                IsAiOperationRunning = false;
+                SetCanAnalyze(_currentRun is not null);
+                SetCanTestAi();
+            }
+
+            cancellation.Dispose();
+        }
+    }
 }

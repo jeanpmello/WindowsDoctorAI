@@ -29,10 +29,25 @@
 
     <ScrollViewer>
         <StackPanel Padding="30,26,30,36" Spacing="20">
-            <StackPanel Spacing="4">
-                <TextBlock Text="Windows Doctor AI" FontSize="30" FontWeight="SemiBold" />
-                <TextBlock Text="Diagnóstico, resultados e inventário deste computador" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
+            <Border Background="#102B4C" CornerRadius="16" Padding="26">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="24">
+                    <StackPanel Spacing="7" VerticalAlignment="Center">
+                        <TextBlock Text="Windows Doctor AI" FontSize="30" FontWeight="SemiBold" Foreground="White" />
+                        <TextBlock Text="Uma visão clara para entender o que acontece no seu Windows." TextWrapping="Wrap" Foreground="#D8E5F2" />
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                            <Border Background="#24476A" CornerRadius="12" Padding="10,5"><TextBlock Text="ANÁLISE LOCAL" FontSize="11" FontWeight="SemiBold" Foreground="White" /></Border>
+                            <Border Background="#24476A" CornerRadius="12" Padding="10,5"><TextBlock Text="SOMENTE LEITURA" FontSize="11" FontWeight="SemiBold" Foreground="White" /></Border>
+                        </StackPanel>
+                    </StackPanel>
+                    <Border Grid.Column="1" Background="#193B5E" CornerRadius="12" Padding="16" VerticalAlignment="Center">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="DIAGNÓSTICO LOCAL" FontSize="11" FontWeight="SemiBold" Foreground="#B8D8F4" />
+                            <TextBlock Text="Sistema · atualizações · drivers" FontSize="13" Foreground="White" />
+                            <TextBlock Text="disco · eventos · backups" FontSize="12" Foreground="#D8E5F2" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
 
             <Border Style="{StaticResource InventoryCardStyle}" Padding="14">
                 <TextBlock Text="O histórico de diagnósticos é local e opcional: a gravação vem desligada por padrão. Para ativá-la, abra Configurações. Nenhum diagnóstico será salvo enquanto a opção estiver desligada." TextWrapping="Wrap" />
@@ -53,6 +68,23 @@
                     <TextBlock Text="Última execução" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,0" />
                     <TextBlock Text="{Binding LastDiagnosticText}" TextWrapping="Wrap" />
                 </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource InventoryCardStyle}" Padding="18">
+                <Grid ColumnDefinitions="*,*,*" ColumnSpacing="20">
+                    <StackPanel Spacing="6">
+                        <TextBlock Text="LEITURA RÁPIDA" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBlock Text="{Binding DiagnosticBrief}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="6">
+                        <TextBlock Text="COBERTURA DO DIAGNÓSTICO" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBlock Text="{Binding CoverageSummary}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Spacing="6">
+                        <TextBlock Text="PRÓXIMO PASSO" Style="{StaticResource FieldLabelStyle}" />
+                        <TextBlock Text="{Binding NextStepSummary}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
             </Border>
 
             <Border Style="{StaticResource InventoryCardStyle}">
@@ -306,17 +338,28 @@
             </Grid>
 
             <Border Style="{StaticResource InventoryCardStyle}">
-                <StackPanel Spacing="10">
-                    <TextBlock Text="Análise por IA local (Ollama)" Style="{StaticResource SectionTitleStyle}" />
-                    <TextBlock Text="Ao iniciar a análise, o app envia ao Ollama local o prompt completo exibido na prévia, que pode incluir orientações ManualOnly únicas associadas a achados, com fontes apenas declaradas e não autenticadas. Identificadores conhecidos são redigidos, sem garantia de anonimização completa; o app não controla o processamento ou armazenamento do serviço local. A IA é consultiva, não executa correções e pode errar: confira a orientação na fonte antes de agir." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <Button Content="Analisar com IA local" Command="{Binding AnalyzeWithAiCommand}" IsEnabled="{Binding CanAnalyzeWithAi}" Style="{StaticResource AccentButtonStyle}" />
-                        <Button Content="Cancelar" Command="{Binding CancelAiAnalysisCommand}" IsEnabled="{Binding IsAnalyzingWithAi}" />
-                        <ProgressRing IsActive="{Binding IsAnalyzingWithAi}" Width="24" Height="24" />
+                <StackPanel Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Assistente de análise local" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock Text="Ollama · resposta consultiva · nenhum reparo automático" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <Border Grid.Column="1" Background="{ThemeResource AccentFillColorTertiaryBrush}" CornerRadius="12" Padding="10,5" VerticalAlignment="Center">
+                            <TextBlock Text="IA OPCIONAL" FontSize="11" FontWeight="SemiBold" />
+                        </Border>
+                    </Grid>
+                    <TextBlock Text="Primeiro, teste a instalação com uma frase sintética. Esse teste não envia dados do computador. Para analisar resultados reais, execute o diagnóstico, confira a prévia e escolha Analisar." TextWrapping="Wrap" />
+                    <TextBlock Text="Requer Ollama instalado e iniciado, com o modelo llama3.1:8b baixado. A primeira resposta pode demorar. Na análise real, somente o prompt visível na prévia é enviado ao Ollama local; identificadores conhecidos são redigidos, mas isso não garante anonimização completa." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Button Content="Testar IA sem dados do computador" Command="{Binding TestAiCommand}" IsEnabled="{Binding CanTestAi}" />
+                        <Button Content="Analisar diagnóstico" Command="{Binding AnalyzeWithAiCommand}" IsEnabled="{Binding CanAnalyzeWithAi}" Style="{StaticResource AccentButtonStyle}" />
+                        <Button Content="Cancelar" Command="{Binding CancelAiAnalysisCommand}" IsEnabled="{Binding IsAiOperationRunning}" />
+                        <ProgressRing IsActive="{Binding IsTestingAi}" Width="22" Height="22" />
+                        <ProgressRing IsActive="{Binding IsAnalyzingWithAi}" Width="22" Height="22" />
                     </StackPanel>
-                    <TextBlock Text="{Binding AiStatusText}" TextWrapping="Wrap" FontSize="12" />
+                    <TextBlock Text="{Binding AiStatusText}" TextWrapping="Wrap" FontSize="13" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding AiAnswerText}" Style="{StaticResource FieldValueStyle}" />
-                    <Expander Header="Conferir os dados, orientações e instruções enviados ao Ollama local" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <Expander Header="Revisar o texto que será enviado na análise real" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsEnabled="{Binding CanAnalyzeWithAi}">
                         <TextBox Text="{Binding AiPromptPreview, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="320" />
                     </Expander>
                 </StackPanel>

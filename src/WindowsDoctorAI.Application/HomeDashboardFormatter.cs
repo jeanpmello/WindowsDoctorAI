@@ -40,6 +40,9 @@ public static class HomeDashboardFormatter
                 HealthScoreDescription: "Este registro não contém verificações do Diagnostic Engine. A pontuação é heurística e não representa a saúde global do computador.",
                 CriticalProblemsText: "—",
                 WarningsText: "—",
+                DiagnosticBrief: "Execute uma verificação para receber uma leitura inicial deste computador.",
+                CoverageSummary: "Cobertura ainda não calculada.",
+                NextStepSummary: "Inicie o diagnóstico local; a coleta é somente de leitura.",
                 CategoriesSummary: "Diagnóstico de rede e segurança não incluído; os scanners do Milestone 2 cobrem sistema, drivers e hardware.",
                 FindingsSummary: "Sem resultados estruturados neste registro. O inventário foi preservado.",
                 DiagnosticDurationText: diagnosticDurationText);
@@ -49,6 +52,22 @@ public static class HomeDashboardFormatter
         var healthScoreDescription = report.HealthScore is null
             ? "Nenhuma verificação elegível para a pontuação foi confirmada. Eventos do Visualizador de Eventos continuam nos resultados, mas não calculam a nota. A pontuação é heurística e não representa a saúde global do computador."
             : $"Pontuação heurística por tipo distinto de achado dos demais scanners (scanner, categoria e título). Avisos do Visualizador de Eventos continuam nos detalhes, mas não alteram a nota por si sós, pois registros isolados não confirmam um problema ativo. Há {report.VerifiedChecks} verificação(ões) confirmada(s), {report.UnavailableChecks + report.NotVerifiedChecks} não confirmada(s) e {report.Results.Count} resultado(s). Não representa a saúde global do computador.";
+        var unconfirmedChecks = report.UnavailableChecks + report.NotVerifiedChecks;
+        var diagnosticBrief = report.VerifiedChecks == 0
+            ? "Resultado inconclusivo: nenhuma verificação foi confirmada."
+            : report.CriticalProblems > 0
+                ? $"Prioridade alta: {report.CriticalProblems} achado(s) crítico(s) precisam de revisão."
+                : report.Warnings > 0
+                    ? $"Atenção: {report.Warnings} aviso(s) foram encontrados nas verificações confirmadas."
+                    : "Nenhum achado crítico ou aviso ativo nas verificações confirmadas.";
+        var coverageSummary = $"Confirmadas: {report.VerifiedChecks} · Indisponíveis: {report.UnavailableChecks} · Não verificadas: {report.NotVerifiedChecks}";
+        var nextStepSummary = report.CriticalProblems > 0
+            ? "Revise primeiro as evidências críticas e as orientações manuais correspondentes; nenhuma correção é automática."
+            : unconfirmedChecks > 0
+                ? "Revise os itens sem confirmação. Eles não indicam saúde; tente novamente ou verifique as permissões da fonte."
+                : report.Warnings > 0
+                    ? "Revise os avisos e compare as evidências antes de alterar o sistema."
+                    : "Consulte as evidências por categoria. Resultado sem alertas não substitui uma revisão completa do sistema.";
 
         return new HomeDashboardDisplayState(
             ComputerName: inventory is null ? "Não coletado" : Text(inventory.ComputerName),
@@ -72,6 +91,9 @@ public static class HomeDashboardFormatter
             HealthScoreDescription: healthScoreDescription,
             CriticalProblemsText: report.CriticalProblems.ToString(CultureInfo.InvariantCulture),
             WarningsText: report.Warnings.ToString(CultureInfo.InvariantCulture),
+            DiagnosticBrief: diagnosticBrief,
+            CoverageSummary: coverageSummary,
+            NextStepSummary: nextStepSummary,
             CategoriesSummary: FormatCategories(report),
             FindingsSummary: DiagnosticDisplayFormatter.FormatFindings(report, inventory),
             DiagnosticDurationText: diagnosticDurationText);
@@ -139,6 +161,9 @@ public sealed record HomeDashboardDisplayState(
     string HealthScoreDescription,
     string CriticalProblemsText,
     string WarningsText,
+    string DiagnosticBrief,
+    string CoverageSummary,
+    string NextStepSummary,
     string CategoriesSummary,
     string FindingsSummary,
     string DiagnosticDurationText);

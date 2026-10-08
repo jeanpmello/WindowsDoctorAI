@@ -35,6 +35,9 @@ internal partial class HomeViewModel(
     [ObservableProperty] private string _healthScoreDescription = "A pontuação é heurística e não representa a saúde global do computador; só aparece após evidência observável.";
     [ObservableProperty] private string _criticalProblemsText = "—";
     [ObservableProperty] private string _warningsText = "—";
+    [ObservableProperty] private string _diagnosticBrief = "Execute uma verificação para receber uma leitura inicial deste computador.";
+    [ObservableProperty] private string _coverageSummary = "Cobertura ainda não calculada.";
+    [ObservableProperty] private string _nextStepSummary = "Inicie o diagnóstico local; a coleta é somente de leitura.";
     [ObservableProperty] private string _diagnosticDurationText = "—";
     [ObservableProperty] private string _categoriesSummary = "As categorias serão preenchidas após a execução.";
     [ObservableProperty] private string _findingsSummary = "Nenhum resultado carregado nesta sessão.";
@@ -113,6 +116,7 @@ internal partial class HomeViewModel(
         }
 
         SetCanAnalyze(_currentRun is not null);
+        SetCanTestAi();
     }
 
     partial void OnIsAnalyzingCbsLogChanged(bool value) => UpdateCbsLogCommandState();
@@ -556,6 +560,9 @@ internal partial class HomeViewModel(
         HealthScoreDescription = display.HealthScoreDescription;
         CriticalProblemsText = display.CriticalProblemsText;
         WarningsText = display.WarningsText;
+        DiagnosticBrief = display.DiagnosticBrief;
+        CoverageSummary = display.CoverageSummary;
+        NextStepSummary = display.NextStepSummary;
         CategoriesSummary = display.CategoriesSummary;
         FindingsSummary = display.FindingsSummary;
         DiagnosticDurationText = display.DiagnosticDurationText;
