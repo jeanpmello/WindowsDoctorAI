@@ -12,6 +12,8 @@ Mudanças relevantes do Windows Doctor AI.
 
 - Health Score penaliza cada tipo distinto de achado uma vez, evitando que ocorrências repetidas do mesmo evento saturem a nota; todas as ocorrências continuam nos resultados.
 - A identidade redigida do Event Viewer passa a incluir o timestamp real do evento apenas no hash, reduzindo a fusão de registros distintos com o mesmo ID sem persistir ou exibir mensagens brutas. O timestamp do resultado passa a refletir quando o evento ocorreu.
+- A Home destaca prioridade dos achados confirmados, cobertura indisponível/não verificada e um próximo passo conservador. Essa leitura não afirma causa nem interpreta falta de dados como saúde.
+- Assistente Ollama local ganha um teste de geração sintética que não envia dados do computador, ajudando a confirmar instalação e modelo antes da análise de uma execução real.
 
 ### Hotfix local — 0x800F0831 / CBS sem correlação
 
@@ -39,4 +41,4 @@ Mudanças relevantes do Windows Doctor AI.
 
 - Regras importadas e referências são declaradas; o aplicativo não verifica automaticamente sua autenticidade ou validade.
 - WinUI/XAML e APIs Windows continuam dependendo de validação em uma máquina Windows; testes em Linux não comprovam esse comportamento.
-- A edição Enterprise, AI Assistant, timeline, comparação de diagnósticos, dashboard corporativo e reparos reais permanecem no roadmap.
+- A edição Enterprise, IA remota, timeline, comparação de diagnósticos, dashboard corporativo e reparos reais permanecem no roadmap.

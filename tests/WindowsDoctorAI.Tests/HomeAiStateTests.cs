@@ -205,6 +205,44 @@ public sealed class HomeAiStateTests
     }
 
     [Fact]
+    public async Task Local_ai_test_runs_without_sending_diagnostic_data()
+    {
+        var run = CreateFindingRun(Guid.NewGuid(), "0xDEADBEEF");
+        var history = new TestHistory { LatestRun = run };
+        var provider = new CapturingAiProvider();
+        var viewModel = CreateViewModel(history, new CompletedDiagnosticEngine(run.Report!), provider);
+        await viewModel.LoadLatestAsync();
+
+        Assert.True(viewModel.TestAiCommand.CanExecute(null));
+        await viewModel.TestAiCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, provider.AvailabilityCount);
+        Assert.Equal(1, provider.AnalysisCount);
+        Assert.DoesNotContain("0xDEADBEEF", provider.LastRequest!.UserPrompt);
+        Assert.Contains("IA local pronta", provider.LastRequest.UserPrompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("resposta", viewModel.AiAnswerText);
+        Assert.Contains("nenhum dado do diagnóstico", viewModel.AiStatusText, StringComparison.OrdinalIgnoreCase);
+        Assert.True(viewModel.AnalyzeWithAiCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Local_ai_can_be_tested_before_running_a_diagnostic()
+    {
+        var history = new TestHistory();
+        var provider = new CapturingAiProvider();
+        var viewModel = CreateViewModel(history, new CompletedDiagnosticEngine(CreateReport()), provider);
+        await viewModel.LoadLatestAsync();
+
+        Assert.False(viewModel.CanAnalyzeWithAi);
+        Assert.True(viewModel.TestAiCommand.CanExecute(null));
+        await viewModel.TestAiCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, provider.AnalysisCount);
+        Assert.Contains("IA local pronta", provider.LastRequest!.UserPrompt);
+        Assert.False(viewModel.AnalyzeWithAiCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task Loading_history_invalidates_ai_until_the_new_run_guidance_projection_is_complete()
     {
         var oldRun = CreateFindingRun(Guid.NewGuid(), "0x11112222");

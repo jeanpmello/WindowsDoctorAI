@@ -6,7 +6,7 @@ Este roadmap distingue componentes implementados de integração visual, valida�
 
 - Solution .NET 9 em Clean Architecture e desktop WinUI 3/MVVM.
 - Inventário local, configurações, SQLite e testes.
-- IA e reparos sem provedor/executor ativo.
+- Na baseline inicial, IA e reparos ainda não tinham provedor/executor ativo. A análise local foi incorporada no Milestone 3; nenhum reparo do Windows está registrado.
 
 ## Milestone 2 — Diagnostic Engine (implementado; validação Windows pendente)
 
@@ -31,6 +31,8 @@ Ainda falta executar visualmente XAML/WinUI e validar WUA, Registro, WMI, Event 
 - Repair Engine com contratos de plugins confiáveis registrados em código, confirmação, risco, auditoria e rollback opcional. A composição não registra reparos reais; plugin de teste/demo é inerte.
 - Serviço e ação WinUI para gerar e salvar relatório HTML local da execução atual/mais recente, com resumo, Health Score, evidências, correlações e recomendações; não agrega `RepairHistory` nem histórico de propostas, que permanece no SQLite. Saída escapada e sem recursos/scripts remotos.
 - Ação WinUI para selecionar pacote JSON local, validar e revisar versão, fonte declarada, hash SHA-256 e total de regras antes da importação; base vazia é explícita e falhas/conflitos não deixam gravação parcial.
+- Assistente opcional via Ollama local, restrito a loopback, com prévia do prompt, minimização/redação, limites de tamanho e cancelamento. Um teste sintético exercita geração de modelo sem dados do computador; CI usa respostas simuladas e não valida uma instalação real do Ollama.
+- Home exibe leitura rápida por prioridade e cobertura confirmada/não confirmada, com próximo passo que não transforma ausência de dados em resultado saudável nem recomenda reparo automático.
 - Testes de unidade e migração SQLite para regras, prévia/importação atômica, validação, correspondência, correlação, confirmação, auditoria e composição/escape HTML.
 
 Não incluído: PDF gerado no app, plugin que modifique o Windows, restauração real de backup ou regras oficiais preinstaladas. A prévia sintética não é suporte de recuperação: não garante recuperação nem integridade e exige validação humana. Restauração real permanece ausente e desabilitada; nenhum backup real foi restaurado ou alterado nesta etapa. O catálogo WSB também aguarda validação runtime em uma VM/host Windows Server 2019.
@@ -43,7 +45,7 @@ Não incluído: PDF gerado no app, plugin que modifique o Windows, restauração
 
 ## Visões futuras (fora do Milestone 3)
 
-- **AI Assistant:** explicação opcional, com consentimento e minimização, apoiada em coleta local disponível; não apresentada como diagnóstico certo.
+- **IA remota/cloud:** não incluída; exigiria requisitos próprios de consentimento, minimização, identidade do serviço, retenção e revisão de segurança.
 - **Timeline:** sequência histórica só após fontes estruturadas e timestamps confiáveis.
 - **Comparador de diagnósticos:** diferenças entre execuções e estado de score/checagens, sem usar comparação como prova de causa.
 - **Dashboard corporativo / Enterprise:** agente leve, servidor e painel para múltiplos computadores. Separado do desktop Core e sujeito a arquitetura própria de identidade, acesso, privacidade e auditoria.
