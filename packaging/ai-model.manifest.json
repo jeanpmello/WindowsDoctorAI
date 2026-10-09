@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "status": "planned",
+  "modelId": "microsoft/Phi-3.5-vision-instruct-onnx",
+  "profile": "cpu-int4",
+  "displayName": "Phi-3.5 Vision Instruct ONNX — CPU INT4",
+  "runtime": "Microsoft.ML.OnnxRuntimeGenAI.WinML",
+  "runtimeVersion": "0.17.1",
+  "sourceUrl": "https://huggingface.co/microsoft/Phi-3.5-vision-instruct-onnx",
+  "downloadSubpath": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
+  "license": "MIT",
+  "supportsConversation": true,
+  "supportsScreenshots": true,
+  "minimumRamGb": 16,
+  "targetArchitectures": [
+    "win-x64"
+  ],
+  "requiredFiles": [
+    "genai_config.json",
+    "model.onnx"
+  ],
+  "sha256": null,
+  "sha256Status": "pending-release-asset",
+  "notes": "O SHA-256 será preenchido antes da Release. O modelo não é versionado no Git; a distribuição completa deve incluir o asset validado e os arquivos auxiliares de tokenizer.",
+  "references": [
+    "https://onnxruntime.ai/docs/genai/tutorials/phi3-v.html",
+    "https://huggingface.co/microsoft/Phi-3.5-vision-instruct-onnx"
+  ]
+}

@@ -19,7 +19,7 @@ Esta é uma Alpha, não uma declaração de compatibilidade de produção. Os sc
 
 A execução visual da UI, permissões e respostas das APIs do Windows podem variar conforme edição, atualização, hardware e configuração do host. Os testes automatizados e a checagem do pacote no workflow não substituem um smoke test no computador de destino. O projeto ainda usa .NET 9; a [política Microsoft de suporte](https://learn.microsoft.com/en-us/dotnet/core/releases-and-support) indica suporte até novembro de 2026, portanto essa base precisa de acompanhamento para além desse período.
 
-O app é local. A análise por IA é opcional e usa somente um Ollama instalado neste computador (endereço restrito a loopback); sem o Ollama e um modelo baixado, o botão informa o que falta. O inventário não é enviado a serviço externo. O histórico local de diagnósticos é opt-in e desativado por padrão; dados necessários ao funcionamento podem ser gravados localmente, e relatórios HTML só são salvos se solicitados pela pessoa usuária.
+O app é local. Nesta Alpha, a análise por IA continua opcional e usa o Ollama instalado neste computador apenas como ponte de desenvolvimento (endereço restrito a loopback); sem o Ollama e um modelo baixado, o botão informa o que falta. O pacote completo planejado usará o runtime ONNX embutido e o modelo Phi-3.5 Vision indicado em `AI-MODEL-MANIFEST.json`, sem exigir Ollama. O manifesto é informativo nesta Alpha e ainda está aguardando o SHA-256 do asset de Release. O inventário não é enviado a serviço externo. O histórico local de diagnósticos é opt-in e desativado por padrão; dados necessários ao funcionamento podem ser gravados localmente, e relatórios HTML só são salvos se solicitados pela pessoa usuária.
 
 ## Verificar somente o XAML da janela
 

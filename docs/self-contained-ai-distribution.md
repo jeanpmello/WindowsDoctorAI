@@ -50,6 +50,8 @@ O modelo não será versionado no Git porque isso torna o repositório impratic�
 - contexto máximo;
 - data de publicação.
 
+O primeiro perfil selecionado é o **Phi-3.5 Vision Instruct ONNX CPU INT4**, da Microsoft, no subdiretório `cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4`. Ele foi escolhido porque oferece conversa e visão em um formato compatível com ONNX Runtime GenAI e não exige uma GPU dedicada. O model card indica mínimo de 16 GB de RAM; por isso a aplicação deverá detectar memória insuficiente e oferecer diagnóstico determinístico, sem travar ou marcar o computador como saudável.
+
 O instalador incorporará o asset para a edição completa. Um pacote de desenvolvimento poderá omitir o modelo, mas isso não será chamado de produto completo.
 
 ## Fluxo de instalação final
