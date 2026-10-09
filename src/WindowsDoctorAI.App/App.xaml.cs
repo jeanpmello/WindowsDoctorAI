@@ -53,11 +53,18 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                 {
                     var ollamaOptions = context.Configuration.GetSection(OllamaOptions.SectionName).Get<OllamaOptions>() ?? new OllamaOptions();
                     services.AddSingleton(ollamaOptions);
+                    var embeddedAiOptions = context.Configuration.GetSection(EmbeddedAiOptions.SectionName).Get<EmbeddedAiOptions>() ?? new EmbeddedAiOptions();
+                    services.AddSingleton(embeddedAiOptions);
+                    services.AddSingleton<EmbeddedOnnxGenAiProvider>();
                     services.AddSingleton<OllamaDiagnosticAiProvider>(provider => new OllamaDiagnosticAiProvider(
                         OllamaDiagnosticAiProvider.CreateHttpClient(),
                         provider.GetRequiredService<OllamaOptions>()));
-                    services.AddSingleton<IDiagnosticAiProvider>(provider => provider.GetRequiredService<OllamaDiagnosticAiProvider>());
-                    services.AddSingleton<IDiagnosticAiConversationProvider>(provider => provider.GetRequiredService<OllamaDiagnosticAiProvider>());
+                    services.AddSingleton<IDiagnosticAiProvider>(provider => embeddedAiOptions.Enabled
+                        ? provider.GetRequiredService<EmbeddedOnnxGenAiProvider>()
+                        : provider.GetRequiredService<OllamaDiagnosticAiProvider>());
+                    services.AddSingleton<IDiagnosticAiConversationProvider>(provider => embeddedAiOptions.Enabled
+                        ? provider.GetRequiredService<EmbeddedOnnxGenAiProvider>()
+                        : provider.GetRequiredService<OllamaDiagnosticAiProvider>());
                     services.AddComputerInventoryDiagnostics();
                     services.AddWindowsDoctorInfrastructure(databasePath);
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();

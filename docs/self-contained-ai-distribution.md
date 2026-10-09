@@ -108,6 +108,8 @@ A UI não conhece Ollama, ONNX, Windows ML ou caminhos de modelo. Ela conversa c
 - `Completed`;
 - `Cancelled`.
 
+Nesta etapa foi adicionado `EmbeddedOnnxGenAiProvider` usando `Microsoft.ML.OnnxRuntimeGenAI.WinML` 0.17.1. Ele verifica o diretório do modelo, carrega o runtime somente sob demanda, limita tokens/tempo, permite cancelamento e não executa ações no sistema. O provider permanece desligado por configuração até que um modelo ONNX validado seja distribuído no pacote.
+
 ## Conversa, busca e telas de erro
 
 O runtime embutido deverá sustentar:
