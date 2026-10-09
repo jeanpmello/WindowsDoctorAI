@@ -30,6 +30,15 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
         if (!_options.Enabled)
             return Task.FromResult(new AiProviderAvailability(false, "O runtime de IA embutido está desligado nesta configuração."));
 
+        var availableMemory = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        var minimumMemory = Math.Max(_options.MinimumRamGb, 1) * 1024L * 1024L * 1024L;
+        if (availableMemory > 0 && availableMemory < minimumMemory)
+        {
+            return Task.FromResult(new AiProviderAvailability(false,
+                $"A memória disponível pode ser insuficiente para o modelo {_options.ModelName}; mínimo recomendado: {_options.MinimumRamGb} GB.",
+                _options.ModelName));
+        }
+
         if (!_options.TryGetModelDirectory(out var directory) || !Directory.Exists(directory))
         {
             return Task.FromResult(new AiProviderAvailability(false,
@@ -146,10 +155,78 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
         string mediaType,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new AiAnalysisResult(AiAnalysisStatus.ProviderUnavailable,
-            "O modelo ONNX embutido desta versão é textual e ainda não possui o componente multimodal para screenshots.",
-            Model: _options.ModelName));
+        return AnalyzeScreenshotCoreAsync(prompt, image, mediaType, cancellationToken);
+    }
+
+    private async Task<AiAnalysisResult> AnalyzeScreenshotCoreAsync(
+        string prompt,
+        ReadOnlyMemory<byte> image,
+        string mediaType,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > 4_000)
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse,
+                "O texto para análise da screenshot é inválido ou excede o limite.", Model: _options.ModelName);
+
+        if (image.Length is 0 or > 8 * 1024 * 1024)
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse,
+                "A screenshot está vazia ou excede o limite de 8 MiB.", Model: _options.ModelName);
+
+        var extension = mediaType switch
+        {
+            "image/png" => ".png",
+            "image/jpeg" => ".jpg",
+            "image/webp" => ".webp",
+            _ => string.Empty
+        };
+        if (extension.Length == 0)
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse,
+                "O formato da screenshot não é suportado.", Model: _options.ModelName);
+
+        if (!_options.Enabled)
+            return new AiAnalysisResult(AiAnalysisStatus.NotConfigured, "O runtime de IA embutido está desligado.", Model: _options.ModelName);
+
+        if (!_options.TryGetModelDirectory(out var directory) || !Directory.Exists(directory))
+            return new AiAnalysisResult(AiAnalysisStatus.ModelNotInstalled,
+                "O modelo ONNX multimodal não está incluído no pacote desta instalação.", Model: _options.ModelName);
+
+        await _generationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var temporaryImage = Path.Combine(Path.GetTempPath(), $"WindowsDoctorAI-{Guid.NewGuid():N}{extension}");
+        try
+        {
+            await File.WriteAllBytesAsync(temporaryImage, image.ToArray(), cancellationToken).ConfigureAwait(false);
+            var timeoutSeconds = Math.Clamp(_options.TimeoutSeconds, 10, 900);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            var model = GetModel(directory);
+            var fullPrompt = $"<|system|>Você é um assistente técnico. Extraia apenas evidências visíveis, códigos legíveis e hipóteses claramente marcadas; não execute ações.<|end|><|user|><|image_1|>{prompt}<|end|><|assistant|>";
+            var answer = await Task.Run(() => GenerateFromImage(model, fullPrompt, temporaryImage, timeout.Token), timeout.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(answer))
+                return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse, "O modelo não produziu uma leitura da screenshot.", Model: _options.ModelName);
+
+            if (answer.Length > MaxAnswerCharacters)
+                answer = answer[..MaxAnswerCharacters] + "\n(resposta truncada)";
+            return new AiAnalysisResult(AiAnalysisStatus.Completed, "Screenshot analisada localmente.", answer.Trim(), _options.ModelName);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.Cancelled, "Análise da screenshot cancelada.", Model: _options.ModelName);
+        }
+        catch (OperationCanceledException)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.Timeout, "A análise da screenshot demorou demais.", Model: _options.ModelName);
+        }
+        catch (Exception)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.ProviderUnavailable,
+                "O runtime ONNX multimodal não conseguiu processar a screenshot.", Model: _options.ModelName);
+        }
+        finally
+        {
+            _generationGate.Release();
+            try { File.Delete(temporaryImage); } catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     private Model GetModel(string directory)
@@ -183,6 +260,7 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
         while (!generator.IsDone())
         {
             cancellationToken.ThrowIfCancellationRequested();
+            generator.ComputeLogits();
             generator.GenerateNextToken();
             var token = generator.GetSequence(0)[^1];
             var part = tokenizerStream.Decode(token);
@@ -196,6 +274,34 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
             {
                 break;
             }
+        }
+
+        return answer.ToString();
+    }
+
+    private string GenerateFromImage(Model model, string prompt, string imagePath, CancellationToken cancellationToken)
+    {
+        using var image = Images.Load(imagePath);
+        using var processor = new MultiModalProcessor(model);
+        using var tokenizerStream = processor.CreateStream();
+        var inputs = processor.ProcessImages(prompt, image);
+        using var generatorParams = new GeneratorParams(model);
+        generatorParams.SetSearchOption("max_length", Math.Clamp(_options.MaxNewTokens, 128, 4096));
+        generatorParams.SetInputs(inputs);
+        using var generator = new Generator(model, generatorParams);
+        var answer = new StringBuilder();
+
+        while (!generator.IsDone())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            generator.ComputeLogits();
+            generator.GenerateNextToken();
+            var part = tokenizerStream.Decode(generator.GetSequence(0)[^1]);
+            if (string.IsNullOrEmpty(part))
+                continue;
+            answer.Append(part);
+            if (answer.ToString().Contains("<|end|>", StringComparison.Ordinal))
+                break;
         }
 
         return answer.ToString();

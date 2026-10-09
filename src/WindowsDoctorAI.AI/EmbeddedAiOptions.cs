@@ -13,6 +13,8 @@ public sealed class EmbeddedAiOptions
 
     public string ModelName { get; set; } = "embedded-onnx";
 
+    public int MinimumRamGb { get; set; } = 16;
+
     public int MaxNewTokens { get; set; } = 768;
 
     public int TimeoutSeconds { get; set; } = 180;

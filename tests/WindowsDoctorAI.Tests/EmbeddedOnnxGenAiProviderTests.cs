@@ -59,4 +59,27 @@ public sealed class EmbeddedOnnxGenAiProviderTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task Screenshot_analysis_rejects_unsupported_media_without_model()
+    {
+        var provider = new EmbeddedOnnxGenAiProvider(new EmbeddedAiOptions { Enabled = true });
+
+        var result = await provider.AnalyzeScreenshotAsync("ler o erro", new byte[] { 1, 2, 3 }, "image/gif");
+
+        Assert.Equal(AiAnalysisStatus.InvalidResponse, result.Status);
+        Assert.Contains("formato", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Screenshot_analysis_rejects_oversized_image_before_model_load()
+    {
+        var provider = new EmbeddedOnnxGenAiProvider(new EmbeddedAiOptions { Enabled = true });
+        var image = new byte[(8 * 1024 * 1024) + 1];
+
+        var result = await provider.AnalyzeScreenshotAsync("ler o erro", image, "image/png");
+
+        Assert.Equal(AiAnalysisStatus.InvalidResponse, result.Status);
+        Assert.Contains("8 MiB", result.Message, StringComparison.Ordinal);
+    }
 }
