@@ -15,7 +15,7 @@ public sealed class MainWindowNavigationWiringTests
     public void NavigationChoicesCoverEveryRouteAndRemainKeyboardAccessible()
     {
         var document = XDocument.Parse(ReadFixture("MainWindow.xaml"));
-        var choices = document.Descendants(Presentation + "RadioButton").ToArray();
+        var choices = document.Descendants(Presentation + "NavigationViewItem").ToArray();
         var routes = choices
             .Select(choice => (string?)choice.Attribute("Tag"))
             .OrderBy(route => route, StringComparer.Ordinal)
@@ -25,17 +25,15 @@ public sealed class MainWindowNavigationWiringTests
         Assert.All(choices, choice =>
         {
             Assert.False(string.IsNullOrWhiteSpace((string?)choice.Attribute("Content")));
-            Assert.Equal("MainNavigation", (string?)choice.Attribute("GroupName"));
-            Assert.Equal("NavigationButton_Click", (string?)choice.Attribute("Click"));
-            Assert.NotEqual("False", (string?)choice.Attribute("IsTabStop"));
+            Assert.NotNull(choice.Element(Presentation + "NavigationViewItem.Icon"));
         });
 
         var homeChoice = Assert.Single(choices.Where(choice => (string?)choice.Attribute("Tag") == "home"));
         Assert.Equal("Inicial", (string?)homeChoice.Attribute("Content"));
-        Assert.Equal("True", (string?)homeChoice.Attribute("IsChecked"));
+        Assert.Single(document.Descendants(Presentation + "NavigationView")
+            .Where(view => (string?)view.Attribute(Xaml + "Name") == "MainNavigationView"));
         Assert.Single(document.Descendants(Presentation + "Frame")
             .Where(frame => (string?)frame.Attribute(Xaml + "Name") == "PageFrame"));
-        Assert.Empty(document.Descendants().Where(element => element.Name.LocalName == "NavigationView"));
     }
 
     [Fact]
@@ -50,14 +48,12 @@ public sealed class MainWindowNavigationWiringTests
         Assert.Equal(1, CountOccurrences(code, initialNavigation));
         Assert.True(subscriptionIndex >= 0 && initialNavigationIndex > subscriptionIndex,
             "A janela deve assinar o evento de navegação antes de carregar a Home uma única vez.");
-        Assert.Contains("element.Tag is string route", code, StringComparison.Ordinal);
+        Assert.Contains("args.SelectedItem is NavigationViewItem { Tag: string route }", code, StringComparison.Ordinal);
         Assert.Contains("_navigationService.NavigateTo(route)", code, StringComparison.Ordinal);
         Assert.Contains("\"home\" => _pageScope.ServiceProvider.GetRequiredService<HomePage>()", code, StringComparison.Ordinal);
         Assert.Contains("\"about\" => _pageScope.ServiceProvider.GetRequiredService<AboutPage>()", code, StringComparison.Ordinal);
         Assert.Contains("\"settings\" => _pageScope.ServiceProvider.GetRequiredService<SettingsPage>()", code, StringComparison.Ordinal);
-        Assert.Contains("HomeNavigationButton.IsChecked", code, StringComparison.Ordinal);
-        Assert.Contains("AboutNavigationButton.IsChecked", code, StringComparison.Ordinal);
-        Assert.Contains("SettingsNavigationButton.IsChecked", code, StringComparison.Ordinal);
+        Assert.Contains("MainNavigationView.SelectedItem", code, StringComparison.Ordinal);
         Assert.Contains("PageFrame.Content = page", code, StringComparison.Ordinal);
     }
 

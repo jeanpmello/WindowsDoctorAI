@@ -24,18 +24,22 @@ public sealed partial class MainWindow : Window
         _navigationService.NavigateTo("home");
     }
 
-    private void NavigationButton_Click(object sender, RoutedEventArgs args)
+    private void NavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (sender is FrameworkElement element && element.Tag is string route)
+        if (args.SelectedItem is NavigationViewItem { Tag: string route })
             _navigationService.NavigateTo(route);
     }
 
     private void NavigationService_Navigated(object? sender, string route)
     {
         StartupFailureContext.SetStage(StartupFailureStage.MainWindowNavigation);
-        HomeNavigationButton.IsChecked = string.Equals(route, "home", StringComparison.OrdinalIgnoreCase);
-        AboutNavigationButton.IsChecked = string.Equals(route, "about", StringComparison.OrdinalIgnoreCase);
-        SettingsNavigationButton.IsChecked = string.Equals(route, "settings", StringComparison.OrdinalIgnoreCase);
+        MainNavigationView.SelectedItem = route.ToLowerInvariant() switch
+        {
+            "home" => HomeNavigationItem,
+            "about" => AboutNavigationItem,
+            "settings" => SettingsNavigationItem,
+            _ => null
+        };
         PageFrame.Content = null;
         _pageScope?.Dispose();
         _pageScope = _services.CreateScope();

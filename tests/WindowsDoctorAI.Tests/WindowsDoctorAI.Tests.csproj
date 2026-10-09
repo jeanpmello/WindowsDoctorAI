@@ -37,5 +37,7 @@
     <None Include="../../.github/workflows/alpha-package.yml" Link="Fixtures/Alpha/alpha-package.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../src/WindowsDoctorAI.App/MainWindow.xaml" Link="Fixtures/App/MainWindow.xaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../src/WindowsDoctorAI.App/MainWindow.xaml.cs" Link="Fixtures/App/MainWindow.xaml.cs" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/WindowsDoctorAI.App/HomePage.xaml" Link="Fixtures/App/HomePage.xaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../src/WindowsDoctorAI.App/HomePage.xaml.cs" Link="Fixtures/App/HomePage.xaml.cs" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

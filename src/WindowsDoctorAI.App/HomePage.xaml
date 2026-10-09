@@ -3,7 +3,8 @@
     x:Name="RootPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Loaded="Page_Loaded">
+    Loaded="Page_Loaded"
+    SizeChanged="Page_SizeChanged">
     <Page.Resources>
         <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="18" />
@@ -28,7 +29,7 @@
     </Page.Resources>
 
     <ScrollViewer>
-        <StackPanel Padding="30,26,30,36" Spacing="20">
+        <StackPanel x:Name="ContentStack" Padding="30,26,30,36" Spacing="20">
             <StackPanel Spacing="4">
                 <TextBlock Text="Windows Doctor AI" FontSize="30" FontWeight="SemiBold" />
                 <TextBlock Text="Diagnóstico, resultados e inventário deste computador" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -42,7 +43,7 @@
                 <StackPanel Spacing="8">
                     <TextBlock Text="Diagnóstico do computador" Style="{StaticResource SectionTitleStyle}" />
                     <TextBlock Text="A coleta é local e somente de leitura. Nenhum reparo será aplicado." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
+                    <StackPanel x:Name="DiagnosticActionsStack" Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
                         <Button Content="Iniciar Diagnóstico" Command="{Binding StartDiagnosticCommand}" Style="{StaticResource AccentButtonStyle}" />
                         <ProgressRing IsActive="{Binding IsScanning}" Width="24" Height="24" />
                     </StackPanel>
@@ -59,7 +60,7 @@
                 <StackPanel Spacing="8">
                     <TextBlock Text="Análise manual de CBS.log" Style="{StaticResource SectionTitleStyle}" />
                     <TextBlock Text="Selecione manualmente um CBS.log para uma observação offline independente. Nenhum evento ou atualização será associado; conteúdo lido somente em memória (limite 2 MiB), sem gravação, histórico, exportação ou recomendação." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="12">
+                    <StackPanel x:Name="CbsActionsStack" Orientation="Horizontal" Spacing="12">
                         <Button Content="Selecionar CBS.log e analisar" Command="{Binding AnalyzeCbsLogCommand}" IsEnabled="{Binding CanAnalyzeCbsLog}" />
                         <ProgressRing IsActive="{Binding IsAnalyzingCbsLog}" Width="22" Height="22" />
                     </StackPanel>
@@ -74,7 +75,7 @@
                 <StackPanel Spacing="10">
                     <TextBlock Text="Versões de backup disponíveis" Style="{StaticResource SectionTitleStyle}" />
                     <TextBlock Text="A lista é consultada somente quando você pedir e permanece temporária nesta tela. Exibe apenas ID opaco, data UTC, tipo normalizado e contagem de volumes quando disponível; não inclui nomes, caminhos, host ou arquivos." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="12">
+                    <StackPanel x:Name="BackupActionsStack" Orientation="Horizontal" Spacing="12">
                         <Button Content="Atualizar versões" Command="{Binding RefreshBackupSetCatalogCommand}" />
                         <Button Content="Cancelar consulta" Command="{Binding CancelBackupSetCatalogCommand}" IsEnabled="{Binding IsLoadingBackupSetCatalog}" />
                         <ProgressRing IsActive="{Binding IsLoadingBackupSetCatalog}" Width="22" Height="22" />
@@ -99,7 +100,7 @@
                 </StackPanel>
             </Border>
 
-            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="12">
+            <Grid x:Name="MetricSummaryGrid" ColumnDefinitions="*,*,*" ColumnSpacing="12">
                 <Border Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="6"><TextBlock Text="Problemas críticos" Style="{StaticResource FieldLabelStyle}" /><TextBlock Text="{Binding CriticalProblemsText}" FontSize="24" FontWeight="SemiBold" /></StackPanel>
                 </Border>
@@ -111,7 +112,7 @@
                 </Border>
             </Grid>
 
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+            <Grid x:Name="CategorySummaryGrid" ColumnDefinitions="*,*" ColumnSpacing="16">
                 <Border Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="10">
                         <TextBlock Text="Categorias" Style="{StaticResource SectionTitleStyle}" />
@@ -275,7 +276,7 @@
                 </StackPanel>
             </Border>
 
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+            <Grid x:Name="KnowledgeReportGrid" ColumnDefinitions="*,*" ColumnSpacing="16">
                 <Border Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="10">
                         <TextBlock Text="Base de conhecimento" Style="{StaticResource SectionTitleStyle}" />
@@ -309,7 +310,7 @@
                 <StackPanel Spacing="10">
                     <TextBlock Text="Análise por IA local (Ollama)" Style="{StaticResource SectionTitleStyle}" />
                     <TextBlock Text="Ao iniciar a análise, o app envia ao Ollama local o prompt completo exibido na prévia, que pode incluir orientações ManualOnly únicas associadas a achados, com fontes apenas declaradas e não autenticadas. Identificadores conhecidos são redigidos, sem garantia de anonimização completa; o app não controla o processamento ou armazenamento do serviço local. A IA é consultiva, não executa correções e pode errar: confira a orientação na fonte antes de agir." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="12">
+                    <StackPanel x:Name="AiActionsStack" Orientation="Horizontal" Spacing="12">
                         <Button Content="Analisar com IA local" Command="{Binding AnalyzeWithAiCommand}" IsEnabled="{Binding CanAnalyzeWithAi}" Style="{StaticResource AccentButtonStyle}" />
                         <Button Content="Cancelar" Command="{Binding CancelAiAnalysisCommand}" IsEnabled="{Binding IsAnalyzingWithAi}" />
                         <ProgressRing IsActive="{Binding IsAnalyzingWithAi}" Width="24" Height="24" />
@@ -322,8 +323,25 @@
                 </StackPanel>
             </Border>
 
+            <Border Style="{StaticResource InventoryCardStyle}">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Conversa e leitura de telas de erro" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBlock Text="Converse sobre o diagnóstico atual ou selecione uma captura PNG, JPEG ou WebP. A IA local extrai somente o que estiver legível; não executa comandos, não altera o Windows e não confirma causa apenas pela imagem." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBox Text="{Binding AiChatInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Ex.: por que este erro pode estar acontecendo?" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="72" MaxLength="4000" />
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <Button Content="Enviar para a conversa" Command="{Binding SendAiChatCommand}" IsEnabled="{Binding CanChatWithAi}" Style="{StaticResource AccentButtonStyle}" />
+                        <Button Content="Selecionar tela de erro" Click="ChooseErrorScreenshot_Click" />
+                        <ProgressRing IsActive="{Binding IsChattingWithAi}" Width="24" Height="24" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding AiChatStatusText}" TextWrapping="Wrap" FontSize="12" />
+                    <TextBox Text="{Binding AiChatTranscript, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="360" />
+                    <TextBlock Text="{Binding AiScreenshotStatusText}" TextWrapping="Wrap" FontSize="12" />
+                    <TextBox Text="{Binding AiScreenshotText, Mode=OneWay}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="360" />
+                </StackPanel>
+            </Border>
+
             <TextBlock Text="Informações do computador" Style="{StaticResource SectionTitleStyle}" />
-            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="16">
+            <Grid x:Name="InventoryGrid" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="16" RowSpacing="16">
                 <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource InventoryCardStyle}">
                     <StackPanel Spacing="10">
                         <TextBlock Text="Computador" Style="{StaticResource SectionTitleStyle}" />

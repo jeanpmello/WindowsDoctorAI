@@ -22,9 +22,11 @@ internal partial class HomeViewModel(
     ILogger<HomeViewModel> logger,
     RepairProposalBuilder? repairProposalBuilder = null,
     RepairEngine? repairEngine = null,
-    IDiagnosticAiProvider? aiProvider = null) : ObservableObject
+    IDiagnosticAiProvider? aiProvider = null,
+    IDiagnosticAiConversationProvider? conversationProvider = null) : ObservableObject
 {
     private readonly IDiagnosticAiProvider? _aiProvider = aiProvider;
+    private readonly IDiagnosticAiConversationProvider? _conversationProvider = conversationProvider;
     private static readonly CultureInfo BrazilianCulture = CultureInfo.GetCultureInfo("pt-BR");
 
     [ObservableProperty] private bool _isScanning;
@@ -113,6 +115,7 @@ internal partial class HomeViewModel(
         }
 
         SetCanAnalyze(_currentRun is not null);
+        NotifyChatState();
     }
 
     partial void OnIsAnalyzingCbsLogChanged(bool value) => UpdateCbsLogCommandState();
@@ -715,4 +718,3 @@ internal sealed record RepairProposalDisplayItem(
         string.Join(Environment.NewLine, proposal.StructuredRollbackPostconditions.Select(condition => "• " + condition.DisplayText)),
         "SHA-256 do plano: " + RepairConsent.FingerprintFor(proposal));
 }
-

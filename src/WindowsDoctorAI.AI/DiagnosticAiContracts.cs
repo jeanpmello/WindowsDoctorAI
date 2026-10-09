@@ -36,3 +36,23 @@ public interface IDiagnosticAiProvider
 
     Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisRequest request, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Mensagem de conversa enviada ao modelo local; conteúdo nunca é executado pelo aplicativo.</summary>
+public sealed record AiChatMessage(string Role, string Content)
+{
+    public bool IsValid => Role is "user" or "assistant" or "system" && !string.IsNullOrWhiteSpace(Content);
+}
+
+/// <summary>Porta opcional para conversa contextual e interpretação de imagens no provedor local.</summary>
+public interface IDiagnosticAiConversationProvider
+{
+    Task<AiAnalysisResult> ChatAsync(
+        IReadOnlyList<AiChatMessage> messages,
+        CancellationToken cancellationToken = default);
+
+    Task<AiAnalysisResult> AnalyzeScreenshotAsync(
+        string prompt,
+        ReadOnlyMemory<byte> image,
+        string mediaType,
+        CancellationToken cancellationToken = default);
+}

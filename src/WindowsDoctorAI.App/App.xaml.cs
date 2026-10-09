@@ -53,9 +53,11 @@ public partial class App : global::Microsoft.UI.Xaml.Application
                 {
                     var ollamaOptions = context.Configuration.GetSection(OllamaOptions.SectionName).Get<OllamaOptions>() ?? new OllamaOptions();
                     services.AddSingleton(ollamaOptions);
-                    services.AddSingleton<IDiagnosticAiProvider>(provider => new OllamaDiagnosticAiProvider(
+                    services.AddSingleton<OllamaDiagnosticAiProvider>(provider => new OllamaDiagnosticAiProvider(
                         OllamaDiagnosticAiProvider.CreateHttpClient(),
                         provider.GetRequiredService<OllamaOptions>()));
+                    services.AddSingleton<IDiagnosticAiProvider>(provider => provider.GetRequiredService<OllamaDiagnosticAiProvider>());
+                    services.AddSingleton<IDiagnosticAiConversationProvider>(provider => provider.GetRequiredService<OllamaDiagnosticAiProvider>());
                     services.AddComputerInventoryDiagnostics();
                     services.AddWindowsDoctorInfrastructure(databasePath);
                     services.AddSingleton<IDiagnosticEngine, DiagnosticEngine>();

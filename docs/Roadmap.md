@@ -43,7 +43,7 @@ Não incluído: PDF gerado no app, plugin que modifique o Windows, restauração
 
 ## Visões futuras (fora do Milestone 3)
 
-- **AI Assistant:** explicação opcional, com consentimento e minimização, apoiada em coleta local disponível; não apresentada como diagnóstico certo.
+- **AI Assistant:** explicação opcional via Ollama local já disponível; contratos para conversa contextual e análise de screenshots foram adicionados, mas a UI conversacional e a busca oficial de soluções ainda precisam ser integradas. A IA não é apresentada como diagnóstico certo e não executa ações.
 - **Timeline:** sequência histórica só após fontes estruturadas e timestamps confiáveis.
 - **Comparador de diagnósticos:** diferenças entre execuções e estado de score/checagens, sem usar comparação como prova de causa.
 - **Dashboard corporativo / Enterprise:** agente leve, servidor e painel para múltiplos computadores. Separado do desktop Core e sujeito a arquitetura própria de identidade, acesso, privacidade e auditoria.

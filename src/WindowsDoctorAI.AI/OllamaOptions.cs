@@ -9,7 +9,7 @@ public sealed class OllamaOptions
 
     public string BaseUrl { get; set; } = "http://127.0.0.1:11434";
 
-    public string Model { get; set; } = "llama3.1:8b";
+    public string Model { get; set; } = "qwen3-vl:8b";
 
     /// <summary>Modelos locais podem demorar na primeira resposta (carregamento em memória).</summary>
     public int TimeoutSeconds { get; set; } = 180;

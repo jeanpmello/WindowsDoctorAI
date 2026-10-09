@@ -21,12 +21,21 @@ internal partial class HomeViewModel
     [ObservableProperty] private string _aiPromptPreview = string.Empty;
     [ObservableProperty] private bool _isAnalyzingWithAi;
     [ObservableProperty] private bool _canAnalyzeWithAi;
+    [ObservableProperty] private string _aiChatInput = string.Empty;
+    [ObservableProperty] private string _aiChatTranscript = string.Empty;
+    [ObservableProperty] private string _aiChatStatusText = "A conversa fica somente nesta sessão e usa o diagnóstico redigido atual.";
+    [ObservableProperty] private bool _isChattingWithAi;
+    [ObservableProperty] private bool _canChatWithAi;
+    [ObservableProperty] private string _aiScreenshotText = string.Empty;
+    [ObservableProperty] private string _aiScreenshotStatusText = "Selecione uma captura de tela de erro para análise visual local.";
+    private readonly List<AiChatMessage> _chatHistory = [];
 
     /// <summary>Chamado sempre que a execução atual muda; calcula e guarda a requisição exata exibida na prévia.</summary>
     internal void RefreshAiState()
     {
         CancelAiForContextChange();
         ClearAiAnswer();
+        ClearConversation();
         _aiPromptSnapshot = null;
         if (_aiProvider is null)
         {
@@ -51,9 +60,36 @@ internal partial class HomeViewModel
         AiPromptPreview = $"[Instruções ao modelo]\n{request.SystemPrompt}\n\n[Dados do diagnóstico e orientações ManualOnly (identificadores conhecidos redigidos; fontes não autenticadas)]\n{request.UserPrompt}";
         AiStatusText = $"Pronto. {request.TotalCharacters:N0} caracteres serão enviados pelo app ao endpoint Ollama configurado em loopback neste computador.";
         SetCanAnalyze(true);
+        NotifyChatState();
     }
 
     private void ClearAiAnswer() => AiAnswerText = string.Empty;
+
+    private void ClearConversation()
+    {
+        _chatHistory.Clear();
+        AiChatTranscript = string.Empty;
+        AiChatStatusText = "A conversa fica somente nesta sessão e usa o diagnóstico redigido atual.";
+        AiScreenshotText = string.Empty;
+        AiScreenshotStatusText = "Selecione uma captura de tela de erro para análise visual local.";
+        NotifyChatState();
+    }
+
+    partial void OnAiChatInputChanged(string value) => NotifyChatState();
+
+    partial void OnIsChattingWithAiChanged(bool value) => NotifyChatState();
+
+    private void NotifyChatState()
+    {
+        CanChatWithAi = _conversationProvider is not null
+            && _currentRun is not null
+            && !string.IsNullOrWhiteSpace(AiChatInput)
+            && AiChatInput.Length <= DiagnosticConversationPromptBuilder.MaxUserMessageCharacters
+            && !IsChattingWithAi
+            && !IsScanning
+            && !IsLoadingHistory;
+        SendAiChatCommand.NotifyCanExecuteChanged();
+    }
 
     private void SetCanAnalyze(bool value)
     {
@@ -99,6 +135,7 @@ internal partial class HomeViewModel
         }
 
         SetCanAnalyze(_currentRun is not null);
+        NotifyChatState();
     }
 
     private bool CanRunAiAnalysis() => _aiProvider is not null
@@ -194,6 +231,76 @@ internal partial class HomeViewModel
             cancellation.Dispose();
         }
     }
+
+    private bool CanRunAiChat() => CanChatWithAi;
+
+    [RelayCommand(CanExecute = nameof(CanRunAiChat))]
+    private async Task SendAiChatAsync()
+    {
+        if (_conversationProvider is null || _currentRun is null || string.IsNullOrWhiteSpace(AiChatInput))
+            return;
+
+        var userMessage = AiChatInput.Trim();
+        var request = DiagnosticConversationPromptBuilder.Build(_currentRun, userMessage, _chatHistory);
+        IsChattingWithAi = true;
+        AiChatInput = string.Empty;
+        AiChatStatusText = "Consultando a IA local com o diagnóstico redigido...";
+        try
+        {
+            var result = await _conversationProvider.ChatAsync(request).ConfigureAwait(true);
+            if (result.IsSuccess)
+            {
+                _chatHistory.Add(new AiChatMessage("user", userMessage));
+                _chatHistory.Add(new AiChatMessage("assistant", result.Text!));
+                while (_chatHistory.Count > DiagnosticConversationPromptBuilder.MaxHistoryMessages)
+                    _chatHistory.RemoveAt(0);
+                AiChatTranscript = string.Join("\n\n", _chatHistory.Select(message =>
+                    message.Role == "user" ? $"Você: {message.Content}" : $"Windows Doctor AI: {message.Content}"));
+                AiChatStatusText = $"Resposta gerada localmente por {result.Model ?? "Ollama"}. Revise antes de agir.";
+            }
+            else
+            {
+                AiChatStatusText = result.Message;
+            }
+        }
+        catch (Exception)
+        {
+            AiChatStatusText = "Não foi possível concluir a conversa local; detalhes internos foram omitidos.";
+        }
+        finally
+        {
+            IsChattingWithAi = false;
+            NotifyChatState();
+        }
+    }
+
+    internal async Task AnalyzeScreenshotAsync(byte[] image, string mediaType)
+    {
+        if (_conversationProvider is null || _currentRun is null)
+        {
+            AiScreenshotStatusText = "Execute ou carregue um diagnóstico antes de analisar uma tela.";
+            return;
+        }
+
+        AiScreenshotStatusText = "Analisando a captura localmente; o arquivo não será salvo pelo app.";
+        try
+        {
+            var result = await _conversationProvider.AnalyzeScreenshotAsync(
+                "Identifique o erro visível e relacione-o aos achados atuais, sem afirmar causa confirmada.",
+                image, mediaType).ConfigureAwait(true);
+            AiScreenshotText = result.IsSuccess ? result.Text! : string.Empty;
+            AiScreenshotStatusText = result.IsSuccess
+                ? $"Tela analisada localmente por {result.Model ?? "Ollama"}. A leitura é evidência parcial."
+                : result.Message;
+        }
+        catch (Exception)
+        {
+            AiScreenshotText = string.Empty;
+            AiScreenshotStatusText = "Não foi possível analisar a tela; detalhes internos foram omitidos.";
+        }
+    }
+
+    internal void SetScreenshotStatus(string status) => AiScreenshotStatusText = status;
 
     [RelayCommand]
     private void CancelAiAnalysis() => _aiCancellation?.Cancel();

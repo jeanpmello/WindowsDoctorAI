@@ -54,7 +54,7 @@ Consulte [Arquitetura](Architecture.md), [Roadmap](Roadmap.md), [Segurança](Sec
 
 ## 4. Fora do escopo atual
 
-- Provedor de IA ativo no `main`. A proposta de integração com Ollama está em PR aberto e não faz parte do comportamento integrado.
+- Conversa guiada, busca online automática e análise de screenshots ainda não estão expostas na UI desta versão; o provedor local Ollama e os contratos de conversa/visão são opcionais e permanecem limitados a loopback, sem execução de ações.
 - Plugin que modifique o Windows, restauração real de backup ou execução de comandos de reparo.
 - PDF gerado pelo aplicativo, timeline confiável, comparação de diagnósticos ou determinação causal.
 - Agente, servidor, identidade, autorização, isolamento multi-tenant, sincronização ou dashboard Enterprise.
@@ -72,4 +72,3 @@ Esses itens só passam a ser requisitos de uma entrega quando tiverem escopo, cr
 ## 6. Evolução dos requisitos
 
 Ao adicionar um scanner, integração externa ou ação de reparo, atualizar esta SRS e os documentos relacionados para registrar dados lidos/enviados/alterados, finalidade, consentimento, privilégios, falhas, retenção e evidência de validação. O roadmap define o que é implementação atual, validação pendente ou visão futura.
-

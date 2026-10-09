@@ -6,11 +6,19 @@ using System.Text.Json.Nodes;
 
 namespace WindowsDoctorAI.AI;
 
-/// <summary>Provedor que conversa apenas com um Ollama na própria máquina (API /api/chat e /api/tags).</summary>
-public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
+/// <summary>Provedor local para diagnóstico, conversa contextual e visão de screenshots via API /api/chat e /api/tags.</summary>
+public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider, IDiagnosticAiConversationProvider
 {
     private const int MaxResponseBytes = 256 * 1024;
     private const int MaxAnswerCharacters = 8_000;
+    internal const int MaxConversationMessages = 20;
+    internal const int MaxConversationMessageCharacters = 4_000;
+    public const int MaxScreenshotBytes = 8 * 1024 * 1024;
+    internal const int MaxScreenshotPromptCharacters = 3_000;
+    private static readonly HashSet<string> SupportedImageTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/png", "image/jpeg", "image/webp"
+    };
 
     private readonly HttpClient _httpClient;
     private readonly OllamaOptions _options;
@@ -156,6 +164,157 @@ public sealed class OllamaDiagnosticAiProvider : IDiagnosticAiProvider
                 answer = answer[..MaxAnswerCharacters] + "\n(resposta truncada)";
             }
 
+            return new AiAnalysisResult(AiAnalysisStatus.Completed, "Análise concluída.", answer.Trim(), _options.Model);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.Cancelled, "Análise cancelada.");
+        }
+        catch (OperationCanceledException)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.Timeout, "O modelo demorou demais. Tente um modelo menor ou aumente o tempo limite.");
+        }
+        catch (HttpRequestException)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.ProviderUnavailable, "Não foi possível conectar ao Ollama local.");
+        }
+        catch (InvalidDataException)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse, "A resposta do Ollama excedeu o limite de tamanho.");
+        }
+        catch (DecoderFallbackException)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse, "O Ollama devolveu uma resposta em formato inválido.", Model: _options.Model);
+        }
+    }
+
+    public async Task<AiAnalysisResult> ChatAsync(
+        IReadOnlyList<AiChatMessage> messages,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        if (messages.Count is < 1 or > MaxConversationMessages
+            || messages.Any(message => message is null
+                || !message.IsValid
+                || message.Content.Length > MaxConversationMessageCharacters))
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse,
+                $"A conversa deve conter de 1 a {MaxConversationMessages} mensagens válidas, com no máximo {MaxConversationMessageCharacters} caracteres cada.");
+        }
+
+        var jsonMessages = new JsonArray();
+        foreach (var message in messages)
+        {
+            jsonMessages.Add(new JsonObject
+            {
+                ["role"] = message.Role,
+                ["content"] = message.Content
+            });
+        }
+
+        return await SendChatPayloadAsync(new JsonObject
+        {
+            ["model"] = _options.Model,
+            ["stream"] = false,
+            ["messages"] = jsonMessages,
+            ["options"] = new JsonObject
+            {
+                ["temperature"] = _options.Temperature,
+                ["num_ctx"] = _options.ContextTokens
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<AiAnalysisResult> AnalyzeScreenshotAsync(
+        string prompt,
+        ReadOnlyMemory<byte> image,
+        string mediaType,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(prompt) || prompt.Length > MaxScreenshotPromptCharacters)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse,
+                $"A pergunta sobre a tela deve ter entre 1 e {MaxScreenshotPromptCharacters} caracteres.");
+        }
+
+        if (image.Length is < 1 or > MaxScreenshotBytes)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse,
+                $"A imagem deve ter no máximo {MaxScreenshotBytes / 1024 / 1024} MiB.");
+        }
+
+        if (!SupportedImageTypes.Contains(mediaType.Trim()))
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse,
+                "Formato de tela não suportado. Use PNG, JPEG ou WebP.");
+        }
+
+        var images = new JsonArray();
+        images.Add(JsonValue.Create(Convert.ToBase64String(image.ToArray())));
+        return await SendChatPayloadAsync(new JsonObject
+        {
+            ["model"] = _options.Model,
+            ["stream"] = false,
+            ["messages"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = $"Analise esta tela de erro do Windows. {prompt} Responda em português do Brasil. Extraia somente texto legível, códigos visíveis, aplicativo/tela, evidências, hipóteses claramente marcadas e próximos passos manuais. Não invente texto oculto, não execute ações e não trate a imagem como prova de causa.",
+                    ["images"] = images
+                }
+            },
+            ["options"] = new JsonObject
+            {
+                ["temperature"] = Math.Min(_options.Temperature, 0.2),
+                ["num_ctx"] = _options.ContextTokens
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<AiAnalysisResult> SendChatPayloadAsync(JsonObject payload, CancellationToken cancellationToken)
+    {
+        if (!_options.Enabled)
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.NotConfigured, "A análise por IA está desligada nas configurações.");
+        }
+
+        if (!TryGetBaseUri(out var baseUri, out var configurationProblem))
+        {
+            return new AiAnalysisResult(AiAnalysisStatus.NotConfigured, configurationProblem);
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(_options.TimeoutSeconds, 10, 900)));
+        try
+        {
+            using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, new Uri(baseUri, "api/chat"))
+            {
+                Content = content
+            };
+            using var response = await _httpClient
+                .SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                .ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return new AiAnalysisResult(AiAnalysisStatus.ModelNotInstalled,
+                    $"O modelo {_options.Model} não está instalado. Execute: ollama pull {_options.Model}", Model: _options.Model);
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                return new AiAnalysisResult(AiAnalysisStatus.ProviderUnavailable, "O Ollama recusou a conversa.", Model: _options.Model);
+            }
+
+            var answer = ParseAnswer(await ReadBoundedAsync(response, timeout.Token).ConfigureAwait(false));
+            if (string.IsNullOrWhiteSpace(answer))
+            {
+                return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse, "O Ollama devolveu uma resposta vazia ou em formato inesperado.", Model: _options.Model);
+            }
+            if (answer.Length > MaxAnswerCharacters)
+            {
+                answer = answer[..MaxAnswerCharacters] + "\n(resposta truncada)";
+            }
             return new AiAnalysisResult(AiAnalysisStatus.Completed, "Análise concluída.", answer.Trim(), _options.Model);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
