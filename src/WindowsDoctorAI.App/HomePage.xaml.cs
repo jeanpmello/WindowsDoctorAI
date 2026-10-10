@@ -74,8 +74,11 @@ public sealed partial class HomePage : Page
     {
         for (var index = 0; index < childCount && index < grid.Children.Count; index++)
         {
-            Grid.SetColumn(grid.Children[index], compact ? 0 : index % wideColumnCount);
-            Grid.SetRow(grid.Children[index], compact ? index : index / wideColumnCount);
+            if (grid.Children[index] is not FrameworkElement child)
+                continue;
+
+            Grid.SetColumn(child, compact ? 0 : index % wideColumnCount);
+            Grid.SetRow(child, compact ? index : index / wideColumnCount);
         }
     }
 
