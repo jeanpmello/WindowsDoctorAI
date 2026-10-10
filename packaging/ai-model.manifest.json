@@ -4,7 +4,7 @@
   "modelId": "microsoft/Phi-3.5-vision-instruct-onnx",
   "profile": "cpu-int4",
   "displayName": "Phi-3.5 Vision Instruct ONNX — CPU INT4",
-  "runtime": "Microsoft.ML.OnnxRuntimeGenAI.WinML",
+  "runtime": "Microsoft.ML.OnnxRuntimeGenAI",
   "runtimeVersion": "0.17.1",
   "sourceUrl": "https://huggingface.co/microsoft/Phi-3.5-vision-instruct-onnx",
   "downloadSubpath": "cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4",
