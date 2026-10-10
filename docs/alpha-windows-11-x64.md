@@ -9,6 +9,8 @@ Esta Alpha é distribuída como um artefato ZIP **unpackaged** do workflow `Alph
 3. Aguarde os jobs `Build and test (Windows)` e `Package Alpha artifact` concluírem com sucesso. Baixe `WindowsDoctorAI-alpha-win11-x64` da execução; o download do artefato é um ZIP.
 4. Extraia todo o ZIP para uma pasta local e execute `Start-WindowsDoctorAI.cmd`. O launcher confere o runtime VC++ x64 antes de abrir o app e deixa uma mensagem na janela do terminal se o pré-requisito estiver ausente ou se o processo retornar erro. O executável `WindowsDoctorAI.App.exe` continua disponível, mas iniciar pelo launcher é preferível para facilitar o diagnóstico.
 
+Para gerar o pacote com a IA embutida, use `Run workflow` no workflow `Alpha package (Windows 11 x64)` e marque `Baixar e incluir o Phi-3.5 Vision CPU INT4 no artefato`. Essa opção baixa o modelo oficial durante o job, valida `genai_config.json` e os arquivos ONNX, calcula o hash da árvore de arquivos e ativa o provider embutido somente nesse artefato. O pacote fica muito maior e exige aproximadamente 16 GB de RAM no computador de destino; o CI normal permanece sem esse download quando a opção não é marcada.
+
 Use esta build somente em **Windows 11 x64**. Windows 10, Windows Server (incluindo Server 2019) e Windows em ARM não são alvos afirmados ou validados por esta Alpha. O workflow não assina o executável em nome do projeto nem declara identidade de editor ou confiança de certificado; o Windows pode identificá-lo como aplicativo de publicador desconhecido. Não existe etapa para instalar ou confiar em certificado.
 
 ## Dependências e limites

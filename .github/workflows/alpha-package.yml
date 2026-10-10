@@ -2,9 +2,19 @@ name: Alpha package (Windows 11 x64)
 
 on:
   workflow_dispatch:
+    inputs:
+      include_embedded_model:
+        description: 'Baixar e incluir o Phi-3.5 Vision CPU INT4 no artefato (pacote grande)'
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       skip_build_and_test:
+        required: false
+        type: boolean
+        default: false
+      include_embedded_model:
         required: false
         type: boolean
         default: false
@@ -54,6 +64,46 @@ jobs:
             /p:WindowsPackageType=None `
             "/p:PublishDir=$publishDir\"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Optionally stage Phi-3.5 Vision CPU INT4 model
+        if: ${{ inputs.include_embedded_model }}
+        shell: pwsh
+        run: |
+          $modelStage = Join-Path $env:RUNNER_TEMP 'wdai-phi35-vision-download'
+          if (Test-Path $modelStage) { Remove-Item $modelStage -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $modelStage | Out-Null
+          python -m pip install --disable-pip-version-check --no-input huggingface_hub
+          $env:WDAI_MODEL_STAGE = $modelStage
+          python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id='microsoft/Phi-3.5-vision-instruct-onnx', allow_patterns=['cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4/*'], local_dir=os.environ['WDAI_MODEL_STAGE'])"
+          $source = Join-Path $modelStage 'cpu_and_mobile/cpu-int4-rtn-block-32-acc-level-4'
+          $publishDir = Join-Path $env:RUNNER_TEMP 'wdai-alpha-publish'
+          $target = Join-Path $publishDir 'Models/ai'
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          Copy-Item -Path (Join-Path $source '*') -Destination $target -Recurse -Force
+          if (-not (Test-Path (Join-Path $target 'genai_config.json'))) { throw 'genai_config.json não foi encontrado no modelo baixado.' }
+          $onnx = @(Get-ChildItem -Path $target -Filter '*.onnx' -File -Recurse)
+          if ($onnx.Count -eq 0) { throw 'Nenhum arquivo ONNX foi encontrado no modelo baixado.' }
+          $appSettingsPath = Join-Path $publishDir 'appsettings.json'
+          if (-not (Test-Path $appSettingsPath)) { throw 'appsettings.json não foi publicado; não é possível ativar a IA embutida.' }
+          $settings = Get-Content -Raw $appSettingsPath | ConvertFrom-Json
+          $settings.Embedded.Enabled = $true
+          $settings.Embedded.ModelDirectory = 'Models/ai'
+          $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $appSettingsPath -Encoding utf8
+          $treeLines = @(Get-ChildItem -Path $target -File -Recurse | Sort-Object FullName | ForEach-Object {
+            $relative = $_.FullName.Substring($target.Length).TrimStart('\').Replace('\', '/')
+            "$relative`t$((Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant())"
+          })
+          $sha = [Security.Cryptography.SHA256]::Create()
+          try {
+            $bytes = [Text.Encoding]::UTF8.GetBytes(($treeLines -join "`n"))
+            $treeHash = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+          }
+          finally { $sha.Dispose() }
+          $manifest = Get-Content -Raw '.\packaging\ai-model.manifest.json' | ConvertFrom-Json
+          $manifest.status = 'validated-model-tree'
+          $manifest.sha256 = $treeHash
+          $manifest.sha256Status = 'validated-model-tree'
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path (Join-Path $publishDir 'AI-MODEL-MANIFEST.json') -Encoding utf8
 
       - name: Verify package contents and stage Alpha instructions
         shell: pwsh
@@ -131,7 +181,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
           Copy-Item -Path (Join-Path $publishDir '*') -Destination $packageDir -Recurse -Force
           Copy-Item -Path '.\packaging\Start-WindowsDoctorAI.cmd' -Destination (Join-Path $packageDir 'Start-WindowsDoctorAI.cmd') -Force
-          Copy-Item -Path $modelManifestPath -Destination (Join-Path $packageDir 'AI-MODEL-MANIFEST.json') -Force
+          if ($env:INPUT_INCLUDE_EMBEDDED_MODEL -eq 'true' -or '${{ inputs.include_embedded_model }}' -eq 'true') {
+            $generatedManifest = Join-Path $publishDir 'AI-MODEL-MANIFEST.json'
+            if (-not (Test-Path $generatedManifest)) { throw 'O manifesto calculado do modelo não foi gerado.' }
+            Copy-Item -Path $generatedManifest -Destination (Join-Path $packageDir 'AI-MODEL-MANIFEST.json') -Force
+            $packagedModel = Join-Path $packageDir 'Models/ai'
+            if (-not (Test-Path (Join-Path $packagedModel 'genai_config.json')) -or @(Get-ChildItem $packagedModel -Filter '*.onnx' -File -Recurse).Count -eq 0) {
+              throw 'O pacote foi solicitado com IA embutida, mas os arquivos do modelo não foram empacotados.'
+            }
+          }
+          else {
+            Copy-Item -Path $modelManifestPath -Destination (Join-Path $packageDir 'AI-MODEL-MANIFEST.json') -Force
+          }
           Copy-Item -Path '.\docs\alpha-windows-11-x64.md' -Destination (Join-Path $packageDir 'README-ALPHA.md') -Force
           $requiredPackageFiles = @('WindowsDoctorAI.App.exe', 'Start-WindowsDoctorAI.cmd', 'AI-MODEL-MANIFEST.json', 'README-ALPHA.md')
           $missingPackageFiles = @($requiredPackageFiles | Where-Object { -not (Test-Path (Join-Path $packageDir $_)) })
