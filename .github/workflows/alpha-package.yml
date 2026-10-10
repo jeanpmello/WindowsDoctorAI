@@ -86,8 +86,8 @@ jobs:
           $appSettingsPath = Join-Path $publishDir 'appsettings.json'
           if (-not (Test-Path $appSettingsPath)) { throw 'appsettings.json não foi publicado; não é possível ativar a IA embutida.' }
           $settings = Get-Content -Raw $appSettingsPath | ConvertFrom-Json
-          $settings.Embedded.Enabled = $true
-          $settings.Embedded.ModelDirectory = 'Models/ai'
+          $settings.Ai.Embedded.Enabled = $true
+          $settings.Ai.Embedded.ModelDirectory = 'Models/ai'
           $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $appSettingsPath -Encoding utf8
           $treeLines = @(Get-ChildItem -Path $target -File -Recurse | Sort-Object FullName | ForEach-Object {
             $relative = $_.FullName.Substring($target.Length).TrimStart('\').Replace('\', '/')
