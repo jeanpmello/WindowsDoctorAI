@@ -22,6 +22,7 @@
     <ProjectReference Include="../../src/WindowsDoctorAI.Reporting/WindowsDoctorAI.Reporting.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.Repair/WindowsDoctorAI.Repair.csproj" />
     <ProjectReference Include="../../src/WindowsDoctorAI.AI/WindowsDoctorAI.AI.csproj" />
+    <ProjectReference Include="../../src/WindowsDoctorAI.Networking/WindowsDoctorAI.Networking.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../src/WindowsDoctorAI.App/HomeViewModel.cs" Link="App/HomeViewModel.cs" />
