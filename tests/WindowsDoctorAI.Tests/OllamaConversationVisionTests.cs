@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using WindowsDoctorAI.AI;
 
 namespace WindowsDoctorAI.Tests;
@@ -43,8 +44,10 @@ public sealed class OllamaConversationVisionTests
         Assert.True(result.IsSuccess);
         Assert.Equal("Posso ajudar.", result.Text);
         Assert.Contains("qwen3-vl:8b", handler.LastBody!);
-        Assert.Contains("Você é um técnico Windows.", handler.LastBody!);
-        Assert.Contains("O que significa este erro?", handler.LastBody!);
+        using var document = JsonDocument.Parse(handler.LastBody!);
+        var messages = document.RootElement.GetProperty("messages");
+        Assert.Equal("Você é um técnico Windows.", messages[0].GetProperty("content").GetString());
+        Assert.Equal("O que significa este erro?", messages[1].GetProperty("content").GetString());
     }
 
     [Fact]
