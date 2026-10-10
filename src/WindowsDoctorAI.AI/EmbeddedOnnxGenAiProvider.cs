@@ -191,16 +191,14 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
                 "O modelo ONNX multimodal não está incluído no pacote desta instalação.", Model: _options.ModelName);
 
         await _generationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        var temporaryImage = Path.Combine(Path.GetTempPath(), $"WindowsDoctorAI-{Guid.NewGuid():N}{extension}");
         try
         {
-            await File.WriteAllBytesAsync(temporaryImage, image.ToArray(), cancellationToken).ConfigureAwait(false);
             var timeoutSeconds = Math.Clamp(_options.TimeoutSeconds, 10, 900);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
             var model = GetModel(directory);
             var fullPrompt = $"<|system|>Você é um assistente técnico. Extraia apenas evidências visíveis, códigos legíveis e hipóteses claramente marcadas; não execute ações.<|end|><|user|><|image_1|>{prompt}<|end|><|assistant|>";
-            var answer = await Task.Run(() => GenerateFromImage(model, fullPrompt, temporaryImage, timeout.Token), timeout.Token).ConfigureAwait(false);
+            var answer = await Task.Run(() => GenerateFromImage(model, fullPrompt, image.ToArray(), timeout.Token), timeout.Token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(answer))
                 return new AiAnalysisResult(AiAnalysisStatus.InvalidResponse, "O modelo não produziu uma leitura da screenshot.", Model: _options.ModelName);
 
@@ -224,8 +222,6 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
         finally
         {
             _generationGate.Release();
-            try { File.Delete(temporaryImage); } catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
         }
     }
 
@@ -252,15 +248,14 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
         var sequences = tokenizer.Encode(prompt);
         using var generatorParams = new GeneratorParams(model);
         generatorParams.SetSearchOption("max_length", Math.Clamp(_options.MaxNewTokens, 64, 4096));
-        generatorParams.SetInputSequences(sequences);
         using var generator = new Generator(model, generatorParams);
+        generator.AppendTokenSequences(sequences);
         using var tokenizerStream = tokenizer.CreateStream();
         var answer = new StringBuilder();
 
         while (!generator.IsDone())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            generator.ComputeLogits();
             generator.GenerateNextToken();
             var token = generator.GetSequence(0)[^1];
             var part = tokenizerStream.Decode(token);
@@ -279,22 +274,21 @@ public sealed class EmbeddedOnnxGenAiProvider : IDiagnosticAiProvider, IDiagnost
         return answer.ToString();
     }
 
-    private string GenerateFromImage(Model model, string prompt, string imagePath, CancellationToken cancellationToken)
+    private string GenerateFromImage(Model model, string prompt, byte[] imageBytes, CancellationToken cancellationToken)
     {
-        using var image = Images.Load(imagePath);
+        using var image = Images.Load(imageBytes);
         using var processor = new MultiModalProcessor(model);
         using var tokenizerStream = processor.CreateStream();
         var inputs = processor.ProcessImages(prompt, image);
         using var generatorParams = new GeneratorParams(model);
         generatorParams.SetSearchOption("max_length", Math.Clamp(_options.MaxNewTokens, 128, 4096));
-        generatorParams.SetInputs(inputs);
         using var generator = new Generator(model, generatorParams);
+        generator.SetInputs(inputs);
         var answer = new StringBuilder();
 
         while (!generator.IsDone())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            generator.ComputeLogits();
             generator.GenerateNextToken();
             var part = tokenizerStream.Decode(generator.GetSequence(0)[^1]);
             if (string.IsNullOrEmpty(part))
